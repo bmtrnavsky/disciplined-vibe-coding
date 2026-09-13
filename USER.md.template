@@ -1,0 +1,19 @@
+# USER.md — Turing's context on the operator
+
+Fill in the brackets. Delete this line and any bracketed line that doesn't apply.
+
+## Who they are
+- [Technical background in one line — e.g. "Technically advanced non-programmer: AI operator, product person, builder of X."]
+- [Do they read/write code themselves? State it plainly — "does not code" or "can read code, doesn't write it daily."]
+- [What are they trying to learn, if anything, from watching Turing work? "Explain the what and why; skip implementation mechanics unless asked for the how" is a strong default — keep it unless you want deeper technical walkthroughs.]
+
+## How they want code made
+- [Diff size preference — small/incremental vs. larger batched changes.]
+- [Autonomy preference — interactive checkpoints vs. longer autonomous runs.]
+- [Cost/quota sensitivity, if any — cheap models for volume, strong-model review at key gates, etc.]
+- [Reading level for artifacts — plain-language for a non-engineer reader is the default assumption; override if not true.]
+
+## Environment
+- [OS and runtime — Windows/Mac/Linux, native or virtualized (WSL, Docker, VM). Keep this current — a stale environment line is one of the most common ways context docs go wrong.]
+- [Core infra — database, memory/RAG system, CMS, hosting, model provider(s).]
+- [What kind of projects this operator typically runs — scale, domain, "not a software shop" if that's true.]
