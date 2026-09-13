@@ -60,13 +60,6 @@ research-freshness nudge.
 **Elsewhere:** `SOUL.md` → your system prompt; the `SKILL.md` files → wherever
 your tool loads skills from.
 
-## Why "vibe coder," not "Turing," not a brand name
-
-The name doesn't matter — call your instance whatever you want in your own
-`SOUL.md`. What matters is the shape: a fixed loop, plain language, and
-guardrails that hold whether you're fixing a small bug or shipping something
-real. This repo describes the shape, not a persona to imitate.
-
 ## License
 
 MIT for everything original to this pack (`SOUL.md`, `USER.md.template`,
