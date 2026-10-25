@@ -1,0 +1,60 @@
+<!--
+  OVERLAY EXAMPLE — user/plugins/disciplined-vibe-coding/templates/writing-plan.md.example
+
+  This file shows the shape of an overlay override. It is documentation only:
+  the updater ignores *.example files, and nothing reads this path.
+
+  To activate: copy to the mirror path (drop the .example suffix) and edit:
+
+      cp user/plugins/disciplined-vibe-coding/templates/writing-plan.md.example \
+         user/plugins/disciplined-vibe-coding/templates/writing-plan.md
+
+  From then on the user/ copy replaces
+  plugins/disciplined-vibe-coding/templates/writing-plan.md at use time.
+  Updates replace the shipped template and reapply your copy on top.
+-->
+
+# Plan — [milestone name]
+
+Purpose: atomic tasks one builder can run without asking anything else.
+
+## Steps
+
+Purpose: each step names its file, output, and pass check.
+1. Path: / Content: / Expected output: / Pass check (observable):
+2. ...
+
+## Files touched
+
+Purpose: full list, so review can check blast radius.
+-
+
+## Test strategy
+
+Purpose: what fails first, what proves it passes (`test-first`: RED, then GREEN).
+-
+
+## Example customization (delete or replace with your own)
+
+Purpose: this section does not exist in the shipped template. It is here to
+show what an overlay change looks like — extra sections, tightened wording,
+project-specific checklists. Keep what earns its keep; delete the rest.
+
+## Timebox
+
+Purpose: wall-clock budget for this milestone, so a stuck plan surfaces early.
+Budget:
+What gets cut if the budget runs out:
+
+## Verify criteria
+
+Purpose: the exact re-runnable checks `verify` will run.
+
+## Rollback
+
+Purpose: how to undo this plan if it goes wrong. Skip only if fully reversible.
+-
+
+## Commit message draft
+
+Purpose: `type: concise subject`, ready at plan time.

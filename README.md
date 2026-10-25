@@ -47,6 +47,9 @@ called finished.
 
     SOUL.md              the persona — how it talks, what it never compromises on
     USER.md.template      fill in your own background, environment, and preferences
+    UPDATE.md             update contract: shipped files read-only, user edits in user/
+    scripts/update.sh     updater: replaces the pack, reapplies the overlay
+    user/                 your overlay — customizations live here, never touched by updates
     HOOKS.md              optional shell hook for research-freshness nudges
     hooks/                the one hook this pack ships
     skills/               the ten skills that make up the loop

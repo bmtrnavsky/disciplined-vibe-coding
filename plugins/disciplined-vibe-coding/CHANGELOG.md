@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Update contract: shipped files read-only, user edits live in the `user/`
+  overlay the updater never touches (`UPDATE.md`, `scripts/update.sh`,
+  `user/` with a template overlay example).
+
 ## 0.1.0 — 2026-10-25
 
 First versioned plugin. Folds five practices into the pipeline: brainstorming
