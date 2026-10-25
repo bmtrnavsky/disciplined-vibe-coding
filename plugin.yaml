@@ -1,0 +1,7 @@
+name: disciplined-vibe-coding
+version: 0.1.0
+description: Define/Plan/Build/Verify pipeline with five folded-in practices, for non-engineer builders
+author: Brad Trnavsky
+license: MIT
+homepage: https://github.com/bmtrnavsky/disciplined-vibe-coding
+tags: [coding, skill, planning, testing, verification]
