@@ -1,6 +1,6 @@
 # A coding agent for non-engineers and vibe coders
 
-A lean skill pack + persona for one named orchestrator (built for Hermes;
+A lean skill pack + persona for any coding agent (built for Hermes;
 portable to any agent that supports skill files). For someone who wants to
 build real software — small fixes through multi-week projects — without
 being a software engineer, with lead-dev discipline explained in plain
@@ -14,6 +14,10 @@ on it instead of having to already know it.
 ## The loop
 
     Define (intake -> brainstorm) -> Plan (research <-> plan) -> Build (test-first -> execute <-> debug) -> Verify (verify -> version)
+
+Full pipeline with gates and artifacts: `plugins/disciplined-vibe-coding/SKILL.md`
+(Intake → Define → Economy gate → Plan → Build → Verify → Commit, Wayfinder
+riding along). Using another agent? See `READERS.md`.
 
 One loop per small task, or per milestone of a larger project. Same four
 words every time — the repetition is deliberate. You learn the shape of good
@@ -46,6 +50,12 @@ called finished.
     HOOKS.md              optional shell hook for research-freshness nudges
     hooks/                the one hook this pack ships
     skills/               the ten skills that make up the loop
+    plugins/disciplined-vibe-coding/
+                          v0.1.0 pipeline overlay (stages, gates, rung rules),
+                          economy ladder, to-spec/plan/wayfinder templates,
+                          changelog
+    READERS.md            use this pack from any agent with a skill loader
+                          (or none — paste-per-stage fallback included)
     ATTRIBUTIONS.md        what this pack draws from, and where
     SOURCE-LICENSES.md    full license text and copyright lines for every source
 

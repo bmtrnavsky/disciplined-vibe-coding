@@ -1,11 +1,11 @@
-# USER.md — Turing's context on the operator
+# USER.md — context on the operator
 
 Fill in the brackets. Delete this line and any bracketed line that doesn't apply.
 
 ## Who they are
 - [Technical background in one line — e.g. "Technically advanced non-programmer: AI operator, product person, builder of X."]
 - [Do they read/write code themselves? State it plainly — "does not code" or "can read code, doesn't write it daily."]
-- [What are they trying to learn, if anything, from watching Turing work? "Explain the what and why; skip implementation mechanics unless asked for the how" is a strong default — keep it unless you want deeper technical walkthroughs.]
+- [What are they trying to learn, if anything, from watching the agent work? "Explain the what and why; skip implementation mechanics unless asked for the how" is a strong default — keep it unless you want deeper technical walkthroughs.]
 
 ## How they want code made
 - [Diff size preference — small/incremental vs. larger batched changes.]

@@ -1,4 +1,4 @@
-# HOOKS.md — optional Hermes hooks for Turing
+# HOOKS.md — optional Hermes hooks for this pack
 
 Skills are advisory — hooks keep them honest. Hermes has three hook mechanisms
 (gateway HOOK.yaml+handler.py, plugin ctx.register_hook(), shell hooks declared
@@ -36,17 +36,17 @@ Shell hooks communicate over a strict JSON contract, not plain text:
   (`pre_tool_call` genuinely can, via `{"action": "block", ...}`) — this pack
   doesn't use that, by choice, described below.
 
-## 1. turing-readcheck (pre_llm_call; nudges, never blocks)
+## 1. readcheck (pre_llm_call; nudges, never blocks)
 
 ```yaml
 hooks:
   pre_llm_call:
-    - command: "<path-to-pack>/hooks/turing-readcheck.sh"
+    - command: "<path-to-pack>/hooks/readcheck.sh"
       timeout: 5
 hooks_auto_accept: true
 ```
 
-Checks how long it's been since `.turing/read.log` (relative to the current
+Checks how long it's been since `.pipeline/read.log` (relative to the current
 working directory) was last written. If it's been more than 40 minutes,
 injects a one-line advisory into the next turn's context: touching an
 unfamiliar API or codebase without reading docs first is exactly the failure

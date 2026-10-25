@@ -1,0 +1,11 @@
+name: disciplined-vibe-coding
+version: 0.1.0
+description: Define/Plan/Build/Verify pipeline with five folded-in practices, for non-engineer builders.
+contents:
+  - SKILL.md
+  - references/economy-ladder.md
+  - templates/to-spec.md
+  - templates/writing-plan.md
+  - templates/wayfinder.md
+  - CHANGELOG.md
+install: Add this directory to Hermes `skills.external_dirs` (whole-directory merge). No per-profile surgery, no config hand-edits.
