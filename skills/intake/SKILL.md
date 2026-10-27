@@ -23,6 +23,14 @@ Nothing gets planned or built until Brad has confirmed, in his own words, what s
 - Stakes tier recorded. Success cue written. Direction given, undisputed.
 - Direction forks answered. Roadmap exists iff multi-milestone. Page question asked iff ongoing.
 
+## Rung scaling (economy ladder)
+
+The rung sets the ceremony. One-liner: the chat line IS the intake —
+no interview, no to-spec block; record the rung sentence inline.
+Micro-spec: fast-path answers inline, 3-line micro-spec. Full-spec and
+above: full interview plus grill. Destructive data work always interviews,
+whatever the rung.
+
 ## Cognitive traps
 - "Big ask = big build" — ask learning-vs-tool before scaping weeks of work (X5 finding).
 - "The request is obvious" — confirm the goal, not the mechanism.

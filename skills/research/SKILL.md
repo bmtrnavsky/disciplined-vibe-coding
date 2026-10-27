@@ -24,3 +24,10 @@ Documentation and prior art come first; implementation theory comes second.
 ## Guardrails
 - No API in a plan without docs consulted.
 - No new dependency without existing-solution check.
+
+## Rung scaling (economy ladder)
+
+Full-spec and above: all five steps every time. Micro-spec: steps 1, 2,
+and 4 (docs, log, read-before-modify). One-liner: docs only when the API
+is unfamiliar — still log the consultation. Prior-art check (step 3)
+applies at every rung before a new dependency.

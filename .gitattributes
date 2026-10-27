@@ -1,0 +1,3 @@
+# Keep line endings sane: committed blobs are LF. Shell hooks must check
+# out as LF everywhere — a CRLF shebang line breaks execution on Linux.
+*.sh text eol=lf

@@ -26,3 +26,9 @@ Never patch a symptom you haven't explained.
 - Third same-shape attempt prohibited.
 - Never silence warnings or catch-alls as a "fix."
 - No live-production edits without understood cause and rollback path.
+
+## Rung scaling (economy ladder)
+
+One-liner: reproduce, fix, smoke-check, done. Micro-spec and above: docs
+step plus ranked theories required. MONEY-tier: guard plus recorded manual
+check mandatory; unguarded fixes never ship.

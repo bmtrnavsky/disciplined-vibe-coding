@@ -1,10 +1,20 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 — 2026-10-27
 
-- Update contract: shipped files read-only, user edits live in the `user/`
-  overlay the updater never touches (`UPDATE.md`, `scripts/update.sh`,
-  `user/` with a template overlay example).
+Minor: teardown runs pre-build between Plan and Build (never post-build);
+commit ceremony is rung-scaled (changelog at full-spec+, tags for
+project-rung releases only); Wayfinder records a pass/fail gate result per
+stage exit and Verify artifacts have named homes; pipeline skill registered
+in `__init__.py`; every stage skill reads the economy-ladder rung;
+`readcheck.sh` dependency-free (no jq) with valid JSON on all paths;
+`update.sh` compares baseline-shipped vs new-shipped for conflicts and records
+a shipped baseline so repeat updates compare shipped-then vs shipped-now (plus
+optionally prunes files removed upstream); update contract: shipped files
+read-only, user edits live in the `user/` overlay the updater never touches
+(`UPDATE.md`, `scripts/update.sh`, `user/` with a template overlay example);
+hook/attribution text corrected (four Hermes hook systems; MIT plus one
+Apache-2.0 upstream).
 
 ## 0.1.0 — 2026-10-25
 

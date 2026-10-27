@@ -10,7 +10,7 @@ phase: Plan
 A plan is atomic tasks scoped to ONE milestone.
 
 ## Steps (in order)
-1. **Scope.** `.pipeline/plans/NN-<milestone>.md` per milestone. Small tasks: small plans, never none.
+1. **Scope.** `.pipeline/plans/NN-<milestone>.md` per milestone. One-liner rung: no plan file — the chat line carries it. Micro-spec: 3 bullets. Full-spec and above: full format below.
 2. **Decompose** into 2–5 minute tasks: path, content, expected output, pass/fail check observable without source.
 3. **Budget line for long tasks.** Anything >2 minutes of wall time (training runs, big migrations, bulk embedding) gets an explicit line: expected duration, expected cost if paid compute, and completion signal (file written, metric logged). Never let a multi-hour run start without one.
 4. **Metric targets with tolerance.** Model/eval tasks: pass criterion is metric + band ("macro-F1 >= 0.82, dedupe on seed 42"), not a bare boolean.

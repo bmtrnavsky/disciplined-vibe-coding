@@ -28,3 +28,9 @@ Understanding precedes solutions. Approach forks get aired here, once.
 ## Guardrails
 - Max 3 options per fork. No implementation, no task lists.
 - Picks against recommendation? One evidence-backed objection, then follow.
+
+## Rung scaling (economy ladder)
+
+One-liner and micro-spec: brainstorm only when a real approach fork
+exists; otherwise say so and move to Plan. Full-spec and above: full
+steps with batched forks. Docs-on-demand applies at every rung.

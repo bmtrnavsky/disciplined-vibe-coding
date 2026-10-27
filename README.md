@@ -16,7 +16,7 @@ on it instead of having to already know it.
     Define (intake -> brainstorm) -> Plan (research <-> plan) -> Build (test-first -> execute <-> debug) -> Verify (verify -> version)
 
 Full pipeline with gates and artifacts: `plugins/disciplined-vibe-coding/SKILL.md`
-(Intake → Define → Economy gate → Plan → Build → Verify → Commit, Wayfinder
+(Intake → Define → Economy gate → Plan → Teardown → Build → Verify → Commit, Wayfinder
 riding along). Using another agent? See `READERS.md`.
 
 One loop per small task, or per milestone of a larger project. Same four
@@ -47,14 +47,14 @@ called finished.
 
     SOUL.md              the persona — how it talks, what it never compromises on
     USER.md.template      fill in your own background, environment, and preferences
-    UPDATE.md             update contract: shipped files read-only, user edits in user/
+    UPDATE.md             update contract: shipped paths read-only to you, user edits in user/
     scripts/update.sh     updater: replaces the pack, reapplies the overlay
     user/                 your overlay — customizations live here, never touched by updates
     HOOKS.md              optional shell hook for research-freshness nudges
     hooks/                the one hook this pack ships
     skills/               the ten skills that make up the loop
     plugins/disciplined-vibe-coding/
-                          v0.1.0 pipeline overlay (stages, gates, rung rules),
+                          v0.2.0 pipeline overlay (stages, gates, rung rules),
                           economy ladder, to-spec/plan/wayfinder templates,
                           changelog
     READERS.md            use this pack from any agent with a skill loader
@@ -69,6 +69,12 @@ skills directory (or a shared skills path referenced via
 `skills.external_dirs`); `USER.md.template` → fill in and save as `USER.md`;
 `hooks/` → optional, wire into `config.yaml` per `HOOKS.md` if you want the
 research-freshness nudge.
+
+**Pipeline orchestrator:** `plugins/disciplined-vibe-coding/SKILL.md` is the
+entry skill that runs the whole loop; the root `__init__.py` registers it as
+`disciplined-vibe-coding:disciplined-vibe-coding` alongside the ten stage
+skills. Load this repo as a Hermes plugin (or point your loader at that
+`SKILL.md`) so the loop has a driver — the stage skills alone have none.
 
 **Elsewhere:** `SOUL.md` → your system prompt; the `SKILL.md` files → wherever
 your tool loads skills from.

@@ -1,8 +1,9 @@
 # HOOKS.md — optional Hermes hooks for this pack
 
-Skills are advisory — hooks keep them honest. Hermes has three hook mechanisms
+Skills are advisory — hooks keep them honest. Hermes has four hook systems
 (gateway HOOK.yaml+handler.py, plugin ctx.register_hook(), shell hooks declared
-under `hooks:` in a profile's config.yaml). This pack ships one shell hook.
+under `hooks:` in a profile's config.yaml, plus outbound webhooks which are
+notify-only and cannot steer the agent). This pack ships one shell hook.
 
 ## Real constraint, read this before adding more
 

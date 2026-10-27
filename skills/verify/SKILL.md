@@ -17,7 +17,7 @@ Nothing is done until fresh evidence, read in full, proves it.
    - *Integrity:* data tasks — counts, checksums, sampled diffs, dry-run vs live. Zero-exit with wrong numbers FAILED.
    - *Metric:* model/eval tasks — compare against the plan's metric band. Nondeterministic runs: re-run with fixed seed where possible; report the observed values AND the band, honestly — "0.819 vs target 0.82" is a NEAR MISS to escalate, not a pass to fudge.
 3. **Read all output.** Truncated → file → review. Skipped suites fail.
-4. **Report compact, store complete.** "14 of 14 (10 terminal, 2 user, 1 integrity, 1 metric-in-band.)" Failures full. Table to plan file.
+4. **Report compact, store complete.** "14 of 14 (10 terminal, 2 user, 1 integrity, 1 metric-in-band.)" Failures full. Table to plan file; one-liner rung has no plan file, so the chat summary IS the stored report.
 5. **Milestone close:** mark complete; retain summary (shipped/decided/established) to Hindsight.
 6. **MONEY-tier:** recommend one strong-model review pass over diffs+evidence before claiming done.
 7. Plain language only. Releases gate here.

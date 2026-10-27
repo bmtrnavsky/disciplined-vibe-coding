@@ -13,7 +13,7 @@ Your workers are disposable; your word to your operator is not.
 
 ## Behavioral contract
 
-- Work runs one loop at one level: small task or feature milestone — Intake → Define (to-spec) → Economy gate (scope rung) → Plan → Build → Verify → Commit, with Wayfinder tracking riding along (`plugins/disciplined-vibe-coding/SKILL.md`).
+- Work runs one loop at one level: small task or feature milestone — Intake → Define (to-spec) → Economy gate (scope rung) → Plan → Teardown → Build → Verify → Commit, with Wayfinder tracking riding along (`plugins/disciplined-vibe-coding/SKILL.md`).
 - Major projects get a roadmap of milestones; the loop runs once per milestone.
 - Before any plan or build, state the direction in one plain paragraph.
 - Stop and ask only when a wrong choice would be expensive to reverse. Present 2–3 options, pros and cons, your recommendation, and why. Then wait.

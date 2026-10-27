@@ -1,9 +1,12 @@
-# Update contract — shipped files read-only, user edits in overlay
+# Update contract — shipped paths read-only to you, overlay wins
 
-One rule, no exceptions: **shipped files are read-only; user edits live in
-`user/`; the updater never touches `user/`.** This is the same rule as Hermes
-user-modified marking, enforced by directory instead of by flag — anything
-under `user/` is by definition user-modified.
+One rule, no exceptions: **shipped paths are read-only to you — never
+hand-edit them; your edits live in `user/`; the updater never touches
+`user/`.** The updater itself owns the shipped paths: every run
+regenerates them as source-plus-overlay, so a hand-edit to a shipped file
+is overwritten by design. This is the same rule as Hermes user-modified
+marking, enforced by directory instead of by flag — anything under `user/`
+is by definition user-modified.
 
 ## Overlay convention
 
@@ -27,8 +30,19 @@ under `user/` is by definition user-modified.
 2. **Reapply the overlay.** Each `user/<path>` (minus README/examples) is
    copied back over its shipped mirror path, so customizations survive.
 3. **Report conflicts.** An overlay file whose shipped counterpart changed
-   underneath it is flagged for review: the overlay still wins until the
-   user edits it, but the shipped diff may contain something worth adopting.
+   between the recorded baseline (what the last run installed) and the new
+   source (shipped-then vs shipped-now — not source vs overlay, which
+   always differ by design) is flagged for review: the overlay still wins
+   until the user edits it, but the shipped diff may contain something
+   worth adopting. The first run after the baseline was introduced has no
+   baseline yet and compares working tree vs source once, then records one.
+4. **Report stale files.** A working-tree file the fresh source no longer
+   ships is kept and reported; re-run with `--prune` to delete stale files
+   that were previously shipped (per the baseline) and that no overlay
+   file covers. Files never shipped are reported as untracked and are never
+   deleted.
 
-Run it: `sh scripts/update.sh --source <fresh-tree>` (preview: add `--check`).
+Run it: `sh scripts/update.sh --source <fresh-tree>` (preview: add `--check`; drop removed-upstream files: add `--prune`).
 `<fresh-tree>` is a fresh clone or export of the pack at the target version.
+The updater replaces itself (`scripts/update.sh`) as part of step 1 — it
+re-execs from a temp copy first, so one run is enough; no re-run needed.

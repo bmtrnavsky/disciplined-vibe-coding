@@ -16,8 +16,15 @@ Commit history is the only audit trail.
 ## Steps
 1. **Narrative commits.** Why over what. Imperative. One logical change.
 2. **Semver.** MAJOR breaks use. MINOR adds cleanly. PATCH fixes. Unsure on importables: MAJOR.
-3. **Changelog** per `write-docs`: Added/Changed/Fixed/Deprecated/Removed, "what changed and do I care." Written when changes happen. Milestones earn entries pre-1.0.
-4. **Annotated tags** carry the changelog section.
+3. **Changelog** per `write-docs`: Added/Changed/Fixed/Deprecated/Removed, "what changed and do I care." Full-spec and above: entry per change. One-liner and micro-spec: no entry — the commit message is the record.
+4. **Annotated tags** carry the changelog section. Tags mark project-rung releases only — routine commits never earn one.
+
+## Rung scaling (economy ladder)
+
+One-liner and micro-spec: single commit, no changelog, no tag. Full-spec:
+changelog entry with the change. Project: changelog plus annotated tag at
+release. "No release dance for routine work" holds because routine work is
+not a release.
 
 ## Guardrails
-- No commit bundling unrelated changes. No release without changelog + tag.
+- No commit bundling unrelated changes. No project-rung release without changelog + tag.

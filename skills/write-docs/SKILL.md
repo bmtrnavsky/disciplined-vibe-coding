@@ -20,3 +20,10 @@ Pragmatic (default) for artifacts. Principles-only (one-idea sentences + defined
 
 ## Guardrails
 Never edit code/commands/errors while "fixing" docs. Self-check: 25+ word sentence? undefined term? lurking "should"?
+
+## Rung scaling (economy ladder)
+
+The rung sets artifact weight, not prose quality — STE rules hold at every
+rung. One-liner: chat prose only, nothing retained. Micro-spec and above:
+changelog entries where `version` requires them. Project: retained notes
+and roadmap prose.

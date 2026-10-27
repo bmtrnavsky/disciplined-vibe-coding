@@ -22,3 +22,10 @@ The test exists and fails before the passing code exists.
 ## Guardrails
 - Never implement first to "check the plan."
 - Never weaken a failing test to reach green.
+
+## Rung scaling (economy ladder)
+
+Full-spec and above: RED then GREEN, no exceptions. Micro-spec: one
+failing check before the fix. One-liner: a smoke check after the change
+suffices, declared in chat. Declared exemptions beat faked tests at every
+rung.

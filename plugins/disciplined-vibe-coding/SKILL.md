@@ -1,8 +1,8 @@
 ---
 name: disciplined-vibe-coding
-description: Run any coding task through Intake, Define, Economy gate, Plan, Build, Verify, Commit — with Wayfinder tracking riding along. Use at the start of any build, fix, or multi-session project.
+description: Run any coding task through Intake, Define, Economy gate, Plan, Teardown, Build, Verify, Commit — with Wayfinder tracking riding along. Use at the start of any build, fix, or multi-session project.
 phase: Any
-version: 0.1.0
+version: 0.2.0
 ---
 
 # Disciplined vibe-coding pipeline — end to end
@@ -17,8 +17,8 @@ One loop per small task, or per milestone of a larger project.
 Same stages, same words, every time.
 
 ```text
-Intake --> Define --> Economy gate --> Plan --> Build --> Verify --> Commit
-Wayfinder rides along all stages (one-line status at each stage exit).
+Intake --> Define --> Economy gate --> Plan --> Teardown --> Build --> Verify --> Commit
+Wayfinder rides along all stages (one-line status plus gate result at each stage exit).
 ```
 
 ## Cast: elephant, goldfish, you
@@ -49,10 +49,11 @@ followed. Small work gets less ceremony, never more.
 | 1. Define (grill-with-docs → to-spec) | `intake`, `brainstorm`, `research` | `.pipeline/to-spec.md` (workdir; vault note only if durable) |
 | 2. Economy gate (scope rung) | this file, `references/economy-ladder.md` | one declared sentence in the to-spec |
 | 3. Plan (writing-plans format) | `plan` | `.pipeline/plans/NN-<milestone>.md`, or 3 bullets at micro-spec |
+| 3.5. Teardown (goldfish pre-build review) | this file §3.5 | round notes in plan/to-spec + wayfinder pass/fail |
 | 4. Build (working-tree-only, test-first) | `execute`, `test-first`, `debug` | code + failing-then-passing tests |
-| 5. Verify (teardown review + local proof + drift) | `verify`, `code-comment-hygiene` | fresh evidence, compact report |
-| 6. Commit (one feature, one build, one commit) | `version` | narrative commit; changelog entry when changes happen |
-| Rides along: Wayfinder | this file, `templates/wayfinder.md` | `.pipeline/wayfinder.md`, one line per stage exit |
+| 5. Verify (local proof + drift) | `verify` | fresh evidence, compact report, plan-file table |
+| 6. Commit (one feature, one build, one commit) | `version` | narrative commit; changelog at full-spec+, tag at project |
+| Rides along: Wayfinder | this file, `templates/wayfinder.md` | `.pipeline/wayfinder.md`, one line plus gate result per stage exit |
 
 ## 0. Intake — 5-minute structured capture
 
@@ -82,7 +83,7 @@ Read `references/economy-ladder.md`. Declare one sentence, for example:
 The rung sets the ceremony for every later stage. This gate removes
 friction by downgrading ceremony for small work.
 
-The rung also sets teardown depth (see Verify): micro-spec gets the
+The rung also sets teardown depth (see §3.5): micro-spec gets the
 two-pass teardown; full-spec and above get all five rounds.
 
 ## 3. Plan — fixed shape, rung-scaled
@@ -92,18 +93,12 @@ steps, files touched, test strategy, verify criteria, commit message draft.
 At micro-spec rung it collapses to 3 bullets. Never freeform
 "I'll figure it out as I go."
 
-## 4. Build — working-tree-only, test-first
+## 3.5. Teardown — goldfish review before code counts
 
-Unchanged builder invariants: all edits in the working tree, tests written
-before or with the code (`test-first`), local proof before claiming done.
-These are builder habits, not gates. Nothing fires, nothing blocks.
-
-## 5. Verify — teardown review, local proof, drift check
-
-Three jobs, in this order: teardown the spec before trusting it, prove the
-code locally, then note drift for later.
-
-### 5a. Teardown — goldfish review before code counts
+Teardown happens here, between Plan and Build: it reviews the spec and plan
+before any code is written. Reviewing the spec after the build would only
+find problems already cemented in code. Post-build checking belongs to
+Verify (local proof) and drift, not to teardown.
 
 Run the teardown with goldfish eyes: spec plus linked sources only,
 earlier conversation ignored. Similar is not same. Rung-scaled:
@@ -118,16 +113,31 @@ earlier conversation ignored. Similar is not same. Rung-scaled:
   4. intermediate zoom-out (does it still fit the codebase after the critique),
   5. implementation readiness (is the plan concrete enough to build from).
 
-One line per round in the verify report. Fix the spec, not the code,
-when a round fails — then re-run only the failed round (max one re-run
-per round at micro-spec; full-spec may re-run the full five once).
+One line per round in the plan file (full-spec and above) or the to-spec
+(micro-spec); one-liners record pass/fail in chat. Fix the spec, not the
+code — no code exists yet — when a round fails, then re-run only the
+failed round (max one re-run per round at micro-spec; full-spec may re-run
+the full five once). Wayfinder records pass/fail plus the one-line reason
+that fired the gate.
 
-### 5b. Local proof, then hygiene
+## 4. Build — working-tree-only, test-first
 
-Run the real thing locally. Then the `code-comment-hygiene` pass
-(report-only, owned by the builder). Proof is the job, not overhead.
+Unchanged builder invariants: all edits in the working tree, tests written
+before or with the code (`test-first`), local proof before claiming done.
+These are builder habits, not gates. Nothing fires, nothing blocks. Build
+starts only after Teardown passes (§3.5) — no code exists before review.
 
-### 5c. Drift — later check after the build
+## 5. Verify — local proof, then drift
+
+Two jobs, in this order: prove the code works locally, then check you built
+what was spec'd. Teardown already ran pre-build (§3.5); Verify trusts the
+reviewed spec and checks the code against it.
+
+### 5a. Local proof
+
+Run the real thing locally. Proof is the job, not overhead.
+
+### 5b. Drift — check after the build
 
 After proof, compare the approved spec against what actually shipped and
 record divergences only: missing pieces, shortcuts, or a different shape
@@ -138,14 +148,37 @@ re-reading the whole build.
 ## 6. Commit — one feature, one build, one commit
 
 Commit convention `type: concise subject`. The to-spec acceptance criteria
-are the commit's proof statement. Single commit, no release dance for
-routine work.
+are the commit's proof statement. One feature, one build, one commit —
+with rung-scaled ceremony: one-liner and micro-spec ship as a single
+commit with no changelog or tag; full-spec adds a changelog entry
+(`write-docs`); only project-rung releases earn a tag. Routine work gets
+no release dance because routine work is not a release.
 
-## Wayfinder — one line per stage exit
+## Wayfinder — one line plus gate result per stage exit
 
 At each stage exit, update `.pipeline/wayfinder.md`: stage, decisions,
-next step (`templates/wayfinder.md`). Read-on-resume only. No prompts,
-no forms. Any session or profile resumes mid-pipeline with zero re-brief.
+next step, and the gate result — pass/fail plus the one-line reason that
+fired the gate (`templates/wayfinder.md`). The result line is what makes
+each gate checkable after the fact: a later session can see not just where
+the run stopped but why each prior gate let it through. Read-on-resume
+only. No prompts, no forms. Any session or profile resumes mid-pipeline
+with zero re-brief.
+
+## Verify artifacts — where the proof lives
+
+- Evidence table: appended to the plan file (`verify`), chat-only at
+  one-liner rung (no plan file exists there).
+- Teardown round notes: plan file (full-spec+) or to-spec (micro-spec).
+- Gate results: one result line per stage exit in `.pipeline/wayfinder.md`.
+- Research trail: `.pipeline/read.log` entries (`research`).
+
+## v0.2.0 resolutions
+
+- Teardown runs pre-build (§3.5), between Plan and Build — never post-build.
+- Commit ceremony is rung-scaled: changelog at full-spec+, tags for
+  project-rung releases only; routine work ships as one commit, no release.
+- Gates are checkable: Wayfinder records a pass/fail result per stage exit;
+  Verify artifacts have named homes (see Verify artifacts above).
 
 ## v0.1.0 resolutions (adopted from the proposal)
 

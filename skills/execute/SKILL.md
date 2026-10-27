@@ -26,3 +26,8 @@ Workers write assigned files only. The orchestrator alone touches git, plans, st
 ## Guardrails
 - Workers never hold approval power.
 - No code outside the approved plan; discoveries go back to the plan.
+
+## Rung scaling (economy ladder)
+
+One-liner and micro-spec: direct execute, no workers. Workers exist for
+full-spec and above. Session-close commit applies at every rung.

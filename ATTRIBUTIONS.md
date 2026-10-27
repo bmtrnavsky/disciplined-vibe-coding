@@ -1,8 +1,10 @@
 # Attributions
 
 This pack derives structure, patterns, or text from the following sources.
-Each skill notes its lineage in its frontmatter. License texts must accompany any
-public distribution — fetch each repo's LICENSE file before publishing.
+Each skill notes its lineage in its frontmatter. MIT license texts are
+committed in SOURCE-LICENSES.md — re-verify years and wording against each
+repo's LICENSE file before publishing. The Apache-2.0 source (EGM) is
+linked, not bundled; no verbatim text from it is reused.
 
 - **obra/superpowers** — Jesse Vincent (MIT). Foundation for: brainstorm, plan, test-first, debug, verify.
   <https://github.com/obra/superpowers>

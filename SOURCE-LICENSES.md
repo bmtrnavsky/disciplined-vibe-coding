@@ -1,8 +1,10 @@
-# Source Licenses | All upstream sources confirmed MIT
+# Source Licenses | Upstream sources: MIT plus one Apache-2.0 (EGM)
 
-License text below applies to every upstream project listed. Each project's copyright line
-follows. Per MIT terms, these notices must appear in all copies or substantial portions of
-derived works when this pack is published.
+The MIT license text below applies to the MIT-licensed upstream projects
+listed. Each project's copyright line follows. Per MIT terms, these notices
+must appear in all copies or substantial portions of derived works when this
+pack is published. The Apache-2.0 upstream (google/elephant-goldfish-model)
+is documented separately at the bottom; no verbatim text from it is reused.
 
     obra/superpowers — Copyright (c) 2025 Jesse Vincent
     addyosmani/agent-skills — Copyright (c) 2024-2026 Addy Osmani (MIT; confirm year range at publish)

@@ -27,7 +27,7 @@ plugins/disciplined-vibe-coding/
 SOUL.md         persona (optional; or fold its rules into your system prompt)
 ```
 
-Teardown scales by rung (see the pipeline `SKILL.md` Verify stage): at
+Teardown scales by rung (see the pipeline `SKILL.md` Teardown stage): at
 micro-spec, two passes — consequence, then alternatives. At full-spec and
 above, all five rounds in order — initial zoom-out, comprehension, design
 critique, intermediate zoom-out, implementation readiness. Drift is the
