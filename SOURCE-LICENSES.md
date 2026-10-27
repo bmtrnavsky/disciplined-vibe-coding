@@ -33,3 +33,9 @@ derived works when this pack is published.
     LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
+
+## Apache-2.0 upstream
+
+    google/elephant-goldfish-model — Copyright (c) Google LLC (Apache-2.0).
+    No verbatim text reused; narrative framing adapted in original prose.
+    Full license text: https://www.apache.org/licenses/LICENSE-2.0

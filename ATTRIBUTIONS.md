@@ -18,3 +18,5 @@ public distribution — fetch each repo's LICENSE file before publishing.
   plain-language contract. Confirm license texts at publish time.
 
 Caveman (JuliusBrussee/caveman) was evaluated and deliberately excluded. Not used; provenance note only.
+- **google/elephant-goldfish-model** — narrative framing (elephant/goldfish roles, teardown, drift, review rounds), adapted in original prose, no verbatim text.
+  <https://github.com/google/elephant-goldfish-model> (Apache-2.0)

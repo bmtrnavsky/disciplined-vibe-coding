@@ -1,5 +1,17 @@
 # Reader guide — use this pack from any agent
 
+> Framing adapted from Google's Elephant-Goldfish Model (Apache 2.0) —
+> <https://github.com/google/elephant-goldfish-model>.
+> Elephant / goldfish roles, teardown, drift, and the five review-round
+> names travel from EGM; all wording here is original.
+
+Design with the elephant (full context, drafts the spec). Review with the
+goldfish (spec plus linked sources only, no chat history — the read that
+catches unstated assumptions). You resolve trade-offs and approve before
+code. Teardown is the pre-build review; drift is the later check of spec
+against shipped code. Our Define/Plan/Build/Verify loop, gates, and
+friction contract are unchanged — only the narrative names travel.
+
 The whole pack is plain Markdown plus one optional shell hook. Any agent
 that reads `SKILL.md` files can run it. Copy the directories; nothing
 needs compiling.
@@ -14,6 +26,13 @@ plugins/disciplined-vibe-coding/
   templates/    to-spec, writing-plan, wayfinder
 SOUL.md         persona (optional; or fold its rules into your system prompt)
 ```
+
+Teardown scales by rung (see the pipeline `SKILL.md` Verify stage): at
+micro-spec, two passes — consequence, then alternatives. At full-spec and
+above, all five rounds in order — initial zoom-out, comprehension, design
+critique, intermediate zoom-out, implementation readiness. Drift is the
+post-build check: spec versus shipped code, divergences only, "no drift"
+when they match.
 
 ## Agents with a skill loader
 

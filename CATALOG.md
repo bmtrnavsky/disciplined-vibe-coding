@@ -9,7 +9,7 @@ repo's `plugin-catalog/README.md`). There is no self-serve registry.
 ```yaml
 name: disciplined-vibe-coding
 repo: https://github.com/bmtrnavsky/disciplined-vibe-coding
-sha: eb4dc2ff81dcc9f6645efe021b8d1b4634ebded2
+sha: 78c31df8aa59d38d5b41f48ebdec15925cc96a96
 description: Define/Plan/Build/Verify pipeline with five folded-in practices, for non-engineer builders
 maintainer: bmtrnavsky
 tier: community
