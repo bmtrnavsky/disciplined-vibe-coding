@@ -28,7 +28,7 @@ If anything in this plan runs unsupervised (bots, schedulers, daemons): decision
 
 ## Done when
 - Tasks have path + output + observable check; destructive items have rollback + dry-run; long items have budget lines; eval items have metric bands.
-- Reuse list, decision log, status footer present. Forks answered. APPROVED by Brad.
+- Reuse list, decision log, status footer present. Forks answered. APPROVED by the user.
 
 ## Cognitive traps
 - "One giant plan shows thoroughness" — roadmap holds the whole; plan holds one milestone.

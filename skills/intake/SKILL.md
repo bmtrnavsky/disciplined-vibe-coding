@@ -7,7 +7,7 @@ phase: Define
 # Intake — the point of this skill is not to execute yet
 
 ## Prime directive
-Nothing gets planned or built until Brad has confirmed, in his own words, what success looks like.
+Nothing gets planned or built until the user has confirmed, in his own words, what success looks like.
 
 ## Steps (in order)
 1. **Classify scale and risk.** Full interview MANDATORY when: destructive data touch, multiple files, new dependency, or goal needs more than one sentence. Otherwise fast path.
