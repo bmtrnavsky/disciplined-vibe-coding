@@ -38,8 +38,16 @@ Design with the elephant. Review with the goldfish. You decide.
 
 Every gate below fires as a **fast check plus one-line reason**.
 No multi-step friction. No blocking prompts for routine moves.
-A gate that slows the builder gets bypassed; a gate that rides along gets
-followed. Small work gets less ceremony, never more.
+Small work gets less ceremony, never more.
+
+## Gate enforcement (hard rule)
+
+A failed gate blocks the next stage. The builder cannot advance past
+a red gate on its own authority. The only way past a red gate without
+fixing it is an explicit user bypass, logged in the Wayfinder result
+line: who approved, what was red, and why it was waived. An unlogged
+bypass is a pipeline defect, counted the same as a skipped stage. A
+gate that slows the builder gets fixed; it never gets silently skipped.
 
 ## Stage map (pipeline stage → skill that owns it)
 
@@ -86,6 +94,14 @@ friction by downgrading ceremony for small work.
 The rung also sets teardown depth (see §3.5): micro-spec gets the
 two-pass teardown; full-spec and above get all five rounds.
 
+Step-up rule: the builder declares a higher rung the moment the blast
+radius grows past the declared one (more files, a new dependency, an
+irreversible or production touch, a MONEY-tier surface). The user
+confirms at the next stop — immediately for MONEY-tier touches.
+Stepping up backfills the new rung's missing artifacts (spec, plan
+shape, evidence) before Build continues. A rung never steps down
+mid-build.
+
 ## 3. Plan — fixed shape, rung-scaled
 
 Full format at full-spec rung and above (`templates/writing-plan.md`):
@@ -101,7 +117,11 @@ find problems already cemented in code. Post-build checking belongs to
 Verify (local proof) and drift, not to teardown.
 
 Run the teardown with goldfish eyes: spec plus linked sources only,
-earlier conversation ignored. Similar is not same. Rung-scaled:
+earlier conversation ignored. The reviewer opens only the spec plus
+its linked sources: no chat memory, no hallway context, no "you know
+what I meant." Each round note states the sources opened. Similar is
+not same: a look-alike precedent that answers a different question
+does not pass. Rung-scaled:
 
 - **Micro-spec and below (two passes):** consequence pass asks what
   happens if we build exactly this and where it breaks; alternatives pass
@@ -117,7 +137,10 @@ One line per round in the plan file (full-spec and above) or the to-spec
 (micro-spec); one-liners record pass/fail in chat. Fix the spec, not the
 code — no code exists yet — when a round fails, then re-run only the
 failed round (max one re-run per round at micro-spec; full-spec may re-run
-the full five once). Wayfinder records pass/fail plus the one-line reason
+the full five once). A second failure on the same round stops the
+pipeline: no third attempt without a user direction change. Report
+tried / learned / unexplained / options and wait for his call (same
+stop shape as `debug`). Wayfinder records pass/fail plus the one-line reason
 that fired the gate.
 
 ## 4. Build — working-tree-only, test-first
@@ -148,7 +171,10 @@ re-reading the whole build.
 ## 6. Commit — one feature, one build, one commit
 
 Commit convention `type: concise subject`. The to-spec acceptance criteria
-are the commit's proof statement. One feature, one build, one commit —
+are the commit's proof statement. Secret scan before every commit: search
+the staged diff for keys, tokens, passwords, and connection strings. A hit
+blocks the commit until the secret is revoked or moved out of the tree.
+One feature, one build, one commit —
 with rung-scaled ceremony: one-liner and micro-spec ship as a single
 commit with no changelog or tag; full-spec adds a changelog entry
 (`write-docs`); only project-rung releases earn a tag. Routine work gets
@@ -187,3 +213,6 @@ with zero re-brief.
 - To-spec home: workdir file during build; vault note only if durable.
 - Wayfinder store: tiny human-readable file in workdir.
 - 1.0 bar: three real builds through the full pipeline, zero bypasses.
+  A build counts when it runs every stage for its rung, files its
+  evidence table and Wayfinder gate lines, and logs zero bypasses.
+  The three builds are named in the changelog entry that claims 1.0.

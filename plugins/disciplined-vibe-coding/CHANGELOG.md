@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+Fixed: gates enforced (a red gate blocks the next stage; user bypasses
+logged in Wayfinder with who/what/why); teardown second failure stops
+the pipeline (tried/learned/unexplained/options, wait for his call);
+rung step-up rule (declare, confirm, backfill; never step down);
+goldfish review hardened (spec plus linked sources only, sources stated
+per round); 1.0 bar measurable (counted builds named in the changelog);
+secret scan before every commit.
+
 ## 0.2.0 — 2026-10-27
 
 Minor: teardown runs pre-build between Plan and Build (never post-build);

@@ -1,8 +1,12 @@
 # Economy ladder — right-size the effort before planning
 
 Declare the rung in one sentence in the to-spec. The rung sets the
-ceremony for Plan, Verify, and Commit. When in doubt, pick the lower rung;
-a rung can step up mid-build if the blast radius grows.
+ceremony for Plan, Verify, and Commit. When in doubt, pick the lower rung.
+A rung steps up mid-build when the blast radius grows: more files than
+the rung allows, a new dependency, an irreversible or production touch,
+or a MONEY-tier surface. The builder declares the new rung, the user
+confirms it, and the new rung's missing artifacts are backfilled before
+Build continues. A rung never steps down mid-build.
 
 | Rung | When | Ceremony |
 |---|---|---|

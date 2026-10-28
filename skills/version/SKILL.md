@@ -28,3 +28,5 @@ not a release.
 
 ## Guardrails
 - No commit bundling unrelated changes. No project-rung release without changelog + tag.
+- No commit with an unhandled secret-scan hit: search the staged diff for
+  keys, tokens, passwords, and connection strings first.
