@@ -1,6 +1,12 @@
 # A coding agent for non-engineers and vibe coders
 ![Disciplined Vibe Coding - Define Plan Build Verify, with lead-dev discipline.](https://github.com/bmtrnavsky/disciplined-vibe-coding/releases/download/0.2.0/dvc-og.png)
 
+![Disciplined Vibe Coding](docs/social-preview.png)
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Hermes Plugin](https://img.shields.io/badge/Hermes-Plugin-teal.svg)](https://hermes-agent.nousresearch.com/docs)
+[![Version](https://img.shields.io/badge/version-0.2.0-orange.svg)](plugins/disciplined-vibe-coding/CHANGELOG.md)
+
 A lean skill pack + persona for any coding agent (built for Hermes;
 portable to any agent that supports skill files). For someone who wants to
 build real software — small fixes through multi-week projects — without
