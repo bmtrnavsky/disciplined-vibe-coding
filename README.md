@@ -1,5 +1,4 @@
 # A coding agent for non-engineers and vibe coders
-![Disciplined Vibe Coding - Define Plan Build Verify, with lead-dev discipline.](https://github.com/bmtrnavsky/disciplined-vibe-coding/releases/download/0.2.0/dvc-og.png)
 
 ![Disciplined Vibe Coding](docs/social-preview.png)
 
