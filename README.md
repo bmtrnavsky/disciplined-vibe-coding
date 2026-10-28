@@ -1,4 +1,5 @@
 # A coding agent for non-engineers and vibe coders
+![Disciplined Vibe Coding - Define Plan Build Verify, with lead-dev discipline.](https://github.com/bmtrnavsky/disciplined-vibe-coding/releases/download/0.2.0/dvc-og.png)
 
 A lean skill pack + persona for any coding agent (built for Hermes;
 portable to any agent that supports skill files). For someone who wants to
