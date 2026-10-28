@@ -19,7 +19,7 @@ on it instead of having to already know it.
 
 ## The loop
 
-    Define (intake -> brainstorm) -> Plan (research <-> plan) -> Build (test-first -> execute <-> debug) -> Verify (verify -> version)
+    Define (intake -> brainstorm) -> Plan (research <-> plan) -> Teardown -> Build (test-first -> execute <-> debug) -> Verify (verify -> version)
 
 Full pipeline with gates and artifacts: `plugins/disciplined-vibe-coding/SKILL.md`
 (Intake → Define → Economy gate → Plan → Teardown → Build → Verify → Commit, Wayfinder
@@ -40,6 +40,9 @@ not by reading a lecture about it once.
 - Storing payment card data instead of using a provider-hosted checkout.
 - Running something autonomous (a bot, a scheduler) with no kill-switch.
 - A near-miss on a metric getting quietly rounded up to "good enough."
+- Moving past a failed gate without a logged bypass (who approved, what
+  was red, why it was waived).
+- Committing secrets: a secret scan runs before every commit.
 
 ## Stakes-aware, not one-size-fits-all
 
@@ -56,6 +59,7 @@ called finished.
     UPDATE.md             update contract: shipped paths read-only to you, user edits in user/
     scripts/update.sh     updater: replaces the pack, reapplies the overlay
     user/                 your overlay — customizations live here, never touched by updates
+    scripts/selfcheck.sh  acceptance checks for the pipeline's hard rules
     HOOKS.md              optional shell hook for research-freshness nudges
     hooks/                the one hook this pack ships
     skills/               the ten skills that make up the loop
@@ -67,6 +71,7 @@ called finished.
                           (or none — paste-per-stage fallback included)
     ATTRIBUTIONS.md        what this pack draws from, and where
     SOURCE-LICENSES.md    full license text and copyright lines for every source
+    CATALOG.md            draft entry for the Hermes plugin catalog
 
 ## Install
 
@@ -89,7 +94,8 @@ your tool loads skills from.
 
 MIT for everything original to this pack (`SOUL.md`, `USER.md.template`,
 `HOOKS.md`, this README). The ten skills derive from several MIT-licensed
-sources — see `ATTRIBUTIONS.md` for lineage and `SOURCE-LICENSES.md` for the
-full license text and copyright line of every upstream project. Those
-notices travel with this pack per MIT's terms; keep them if you fork or
-redistribute.
+sources, and the pipeline's elephant/goldfish framing is adapted from
+Google's Elephant-Goldfish Model (Apache-2.0). See `ATTRIBUTIONS.md` for
+lineage and `SOURCE-LICENSES.md` for the full license text and copyright
+line of every upstream project. Those notices travel with this pack per
+their license terms; keep them if you fork or redistribute.
