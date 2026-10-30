@@ -42,7 +42,9 @@ is by definition user-modified.
    file covers. Files never shipped are reported as untracked and are never
    deleted.
 
-Run it: `sh scripts/update.sh --source <fresh-tree>` (preview: add `--check`; drop removed-upstream files: add `--prune`).
+Run it (manual checkouts only — catalog installs update with
+`hermes plugins update disciplined-vibe-coding`, because copying a tree
+over the install moves it off the reviewed pin): `sh scripts/update.sh --source <fresh-tree>` (preview: add `--check`; drop removed-upstream files: add `--prune`).
 `<fresh-tree>` is a fresh clone or export of the pack at the target version.
 The updater replaces itself (`scripts/update.sh`) as part of step 1 — it
 re-execs from a temp copy first, so one run is enough; no re-run needed.

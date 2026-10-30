@@ -57,7 +57,7 @@ called finished.
     SOUL.md              the persona — how it talks, what it never compromises on
     USER.md.template      fill in your own background, environment, and preferences
     UPDATE.md             update contract: shipped paths read-only to you, user edits in user/
-    scripts/update.sh     updater: replaces the pack, reapplies the overlay
+    scripts/update.sh     updater for manual checkouts only (catalog installs: `hermes plugins update disciplined-vibe-coding`)
     user/                 your overlay — customizations live here, never touched by updates
     scripts/selfcheck.sh  acceptance checks for the pipeline's hard rules
     HOOKS.md              optional shell hook for research-freshness nudges

@@ -23,10 +23,12 @@ Shell hooks communicate over a strict JSON contract, not plain text:
   `pre_tool_call`/`post_tool_call` in the first place, so a `pre_llm_call`
   hook never takes one — it fires once per turn, unconditionally.
 - First use of any `(event, command)` pair prompts for interactive approval
-  and persists the decision to an allowlist. Any non-interactive context
-  (gateway, cron) needs `hooks_auto_accept: true` in config.yaml, or the
-  `--accept-hooks` CLI flag, or `HERMES_ACCEPT_HOOKS=1` — otherwise a newly
-  added hook silently never registers.
+  and persists the decision to an allowlist. Approve it once in an
+  interactive `hermes` session and you are done. Unattended contexts
+  (gateway, cron) cannot prompt, so a newly added hook silently never
+  registers there unless you opt in with `hooks_auto_accept: true`,
+  `--accept-hooks`, or `HERMES_ACCEPT_HOOKS=1` — note that switch applies
+  to every shell hook in that profile, not just this one.
 - A hook's script content is trusted by command string, not by hash — editing
   the script on disk does not require re-approval. `hermes hooks doctor`
   flags mtime drift so you notice an edit happened.
@@ -44,8 +46,10 @@ hooks:
   pre_llm_call:
     - command: "<path-to-pack>/hooks/readcheck.sh"
       timeout: 5
-hooks_auto_accept: true
 ```
+
+Approve the hook once in an interactive `hermes` session when prompted;
+that approval is saved and you are done.
 
 Checks how long it's been since `.pipeline/read.log` (relative to the current
 working directory) was last written. If it's been more than 40 minutes,
