@@ -17,6 +17,11 @@ senior engineer would insist on (define before building, test before
 shipping, verify before claiming done), applied consistently so you can lean
 on it instead of having to already know it.
 
+Sibling project:
+[spec-driven-data-analysis](https://github.com/bmtrnavsky/spec-driven-data-analysis)
+applies the same discipline to data work — lock the spec before touching
+the data, verify every run.
+
 ## The loop
 
     Define (intake -> brainstorm) -> Plan (research <-> plan) -> Teardown -> Build (test-first -> execute <-> debug) -> Verify (verify -> version)
