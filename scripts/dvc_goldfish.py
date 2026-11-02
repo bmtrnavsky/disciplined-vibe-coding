@@ -1,19 +1,21 @@
-"""Blind goldfish review loop for the autonomous DVC run (card 2/4).
+"""Blind goldfish review loop for the autonomous DVC run (card 2/4, fix A).
 
 Contract (Brad's stop rules):
 
-- Elephant builds to the spec (here: the spec + plan the run just wrote;
-  no code exists yet at Teardown).
-- Goldfish reviews blind after every round: ``judge_artifact`` receives
-  ONLY the spec text, the plan text, and the round name. No workdir, no
-  chat history, no implementation, no tools. It cannot amend the spec
-  (read-only inputs), cannot run anything (this module has no subprocess,
-  no exec, no input()), and cannot approve: there is no approve verdict.
-  An empty objection list IS the pass. Only the absence of objection ends
-  the loop.
-- Objections return to the elephant as new work; review then restarts from
-  the top round, because rework can break earlier passes and no human is
-  around to judge the blast radius.
+- After Build, the reviewer assembles a hash-locked packet: the locked
+  to-spec, the lock (or lock-pending state), the plans, and the build
+  output. Fixed file set, nothing else. No teardown scratch notes, no
+  elephant responses, no chat history, no memory, no RAG.
+- Goldfish reviews with ONE model call made outside any agent loop:
+  system prompt = the packet template filled with only the stage and
+  round list, user message = the packet inlined as delimited files,
+  ``tools`` empty. It cannot amend anything, cannot run anything, and
+  cannot approve: there is no approve verdict. An empty objection list
+  IS the pass. Only the absence of objection ends the loop.
+- Objections return to the elephant as new work (rework the artifact,
+  never the spec); review then restarts from the top round, because
+  rework can break earlier passes and no human is around to judge the
+  blast radius.
 
 Stop rules:
 
@@ -29,17 +31,21 @@ Stop rules:
 
 On either stop the run reports FAILURE: the round that could not pass,
 the objections verbatim, and what the elephant tried. No partial success,
-no spec loosening, no advance to Build.
+no spec loosening, no advance past Teardown.
 
 Count keying (the p_g3 bypass): failure counts live in
 ``.pipeline/goldfish.json`` keyed (run_id -> round). The spec hash is
 recorded on every verdict for audit but NEVER used as a key, so a mid-run
 amendment + re-lock cannot reset the count.
 
+Fail closed: an oversize packet, a missing spec, a swapped packet file,
+or an unreachable provider stops the run as FAILURE (rule
+``review-error``) -- never as a silent pass.
+
 Test stub: ``DVC_GOLDFISH_STUB`` (comma-separated F/P verdicts consumed in
-review-call order) is honored only when ``DVC_TEST_MODE=1`` -- the same
-gating shape as the sibling project's provider stub. Production runs
-ignore it and use the mechanical judge below.
+call order, one token per review call) is honored only when
+``DVC_TEST_MODE=1`` -- the same gating shape as the sibling project's
+provider stub. Production runs ignore it and call the provider.
 """
 
 import argparse
@@ -50,6 +56,7 @@ import random
 import re
 import sys
 import time
+import urllib.request
 from pathlib import Path
 
 ROUNDS = ("consequence", "alternatives")
@@ -58,67 +65,422 @@ ROUNDS = ("consequence", "alternatives")
 SAME_ROUND_LIMIT = 2
 # Backstop for genuinely new failures on every round: R rounds can fail at
 # most once each on first sight in a converging run, so failure R+1 means
-# cleared ground broke again.
+# cleared ground failed again.
 TOTAL_FAILURE_CAP = len(ROUNDS) + 1
 
 STATE_REL = ".pipeline/goldfish.json"
+PACKETS_REL = ".pipeline/packets"
+REVIEWS_REL = ".pipeline/reviews/goldfish"
+
+FORMAT_PACKET = "dvc-packet-v1"
+FORMAT_CALL = "dvc-goldfish-v1"
+
+DEFAULT_MAX_TOKENS = 100_000
+DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
+DEFAULT_MODEL = "gemini-2.5-flash-lite"
+KEY_ENV = "DVC_GOLDFISH_API_KEY"
+BASE_ENV = "DVC_GOLDFISH_BASE_URL"
+MODEL_ENV = "DVC_GOLDFISH_MODEL"
+CAP_ENV = "DVC_GOLDFISH_MAX_TOKENS"
+STUB_ENV = "DVC_GOLDFISH_STUB"
+# The stub transport fakes a passing provider. It exists for tests only,
+# and is honored exclusively under an explicit test flag:
+# ``DVC_TEST_MODE=1``. In production the variable is ignored and the run
+# fails closed on the missing provider key.
+TEST_ENV = "DVC_TEST_MODE"
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
 ROUND_EXPECTED = {
     "consequence": "what happens if we build exactly this, and where it breaks",
     "alternatives": "what else solves it, and whether this is the strongest option",
 }
 
-# Micro-spec mechanical judge: each pass asks one question; the artifact
-# (spec + plan) passes the round when it answers that question in words.
-ROUND_PATTERNS = {
-    "consequence": re.compile(
-        r"consequence|if we build exactly|where it breaks|breaks if|blast radius|downside",
-        re.IGNORECASE,
-    ),
-    "alternatives": re.compile(
-        r"alternat|instead|option|considered|strongest|doing nothing",
-        re.IGNORECASE,
-    ),
-}
+ROUND_LINE_RE = re.compile(
+    r"^ROUND\s+([A-Za-z][A-Za-z0-9_-]*)\s*:\s*(PASS|FAIL)\b(.*)$",
+    re.IGNORECASE,
+)
+
+# Workdir entries that never enter a packet: run plumbing, history, and
+# bytecode. Everything else the build produced is the artifact under review.
+SKIP_TOP = {".pipeline", ".turing", ".git", "__pycache__", ".venv", "venv",
+            "node_modules", ".hg", ".svn"}
+MAX_OUTPUT_FILES = 50
+MAX_FILE_BYTES = 100_000
 
 
-def _sha(text):
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+class DvcReviewError(Exception):
+    """Fail-closed review error: packet or provider unusable. Never a pass."""
+
+
+def _sha(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
 
 
 def _short(h):
     return (h or "?")[:12]
 
 
+def _stub_allowed() -> bool:
+    return os.environ.get(TEST_ENV) == "1"
+
+
 def _stub_tokens():
     """Verdict script for tests; None in production (stub ignored there)."""
-    if os.environ.get("DVC_TEST_MODE") != "1":
+    if not _stub_allowed():
         return None
-    raw = os.environ.get("DVC_GOLDFISH_STUB", "")
+    raw = os.environ.get(STUB_ENV, "")
     tokens = [t.strip().upper() for t in raw.split(",") if t.strip()]
     return tokens or None
 
 
-def judge_artifact(spec_text, plan_text, round_name, tokens=None):
-    """Blind review of one round. Returns [objections]; [] = pass.
+def _est_tokens(data: bytes) -> int:
+    return max(1, len(data) // 4)
 
-    Sees only the two texts plus the round name -- no workdir, no history,
-    no implementation. Read-only: it cannot amend anything, run anything,
-    or approve anything; silence is the only pass.
+
+def _config():
+    cap_raw = os.environ.get(CAP_ENV, "")
+    try:
+        cap = int(cap_raw) if cap_raw else DEFAULT_MAX_TOKENS
+    except ValueError:
+        raise DvcReviewError(
+            f"{CAP_ENV} must be a positive integer, got {cap_raw!r}")
+    if cap <= 0:
+        raise DvcReviewError(
+            f"{CAP_ENV} must be a positive integer, got {cap_raw!r}")
+    return {
+        "base_url": os.environ.get(BASE_ENV, "") or DEFAULT_BASE_URL,
+        "model": os.environ.get(MODEL_ENV, "") or DEFAULT_MODEL,
+        "key_env": KEY_ENV,
+        "max_tokens": cap,
+    }
+
+
+# ---------- packet ----------
+
+def _packet_files(workdir: Path):
+    """Fixed file set. Never teardown scratch, never elephant responses,
+    never run plumbing. Sees only the packet files."""
+    workdir = Path(workdir)
+    files: list[tuple[str, bytes]] = []
+    spec = workdir / ".pipeline" / "to-spec.md"
+    try:
+        files.append((".pipeline/to-spec.md", spec.read_bytes()))
+    except OSError as exc:
+        raise DvcReviewError("packet cannot be assembled: spec unreadable "
+                             f"({exc}); failing closed") from None
+    lock = workdir / ".pipeline" / "spec.lock"
+    if lock.is_file():
+        files.append((".pipeline/spec.lock", lock.read_bytes()))
+    else:
+        files.append((".pipeline/lock-pending.txt",
+                      b"no spec.lock yet (pre-lock review)\n"))
+    plans = sorted((workdir / ".pipeline" / "plans").glob("*.md"))
+    if not plans:
+        files.append((".pipeline/plans/EMPTY.txt",
+                      b"no plan file written (empty plan)\n"))
+    for plan in plans:
+        try:
+            files.append((plan.relative_to(workdir).as_posix(),
+                          plan.read_bytes()))
+        except OSError:
+            continue
+    outputs, inventory = _collect_outputs(workdir)
+    if not outputs and len(inventory) == 0:
+        files.append((".pipeline/outputs/EMPTY.txt",
+                      b"no build output present (empty artifact)\n"))
+    for rel, data in outputs:
+        files.append((rel, data))
+    files.append((".pipeline/outputs-inventory.txt",
+                  ("# build outputs — names and sizes; binary files are "
+                   "listed, never inlined\n\n"
+                   + ("\n".join(inventory) if inventory else "(none)")
+                   + "\n").encode()))
+    return files
+
+
+def _collect_outputs(workdir: Path):
+    """Build output: text files enter the packet; anything else (binaries
+    like .db files) is listed in the inventory only, never inlined.
+    Inlining binary bytes as decoded text shows the reviewer mojibake it
+    then misreads as content — the sibling project's packet excludes data
+    files for the same reason. Returns (included, inventory_lines)."""
+    included = []
+    inventory = []
+    for path in sorted(workdir.rglob("*")):
+        if not path.is_file():
+            continue
+        try:
+            rel = path.relative_to(workdir).as_posix()
+        except ValueError:
+            continue
+        top = rel.split("/", 1)[0]
+        if top in SKIP_TOP or path.suffix == ".pyc":
+            continue
+        try:
+            size = path.stat().st_size
+        except OSError:
+            continue
+        try:
+            data = path.read_bytes()
+        except OSError:
+            continue
+        try:
+            data.decode("utf-8")
+        except UnicodeDecodeError:
+            inventory.append(
+                f"- {rel}: {size} bytes (binary, not inlined; "
+                f"sha256:{_sha(data)[:12]})")
+            continue
+        if size > MAX_FILE_BYTES:
+            raise DvcReviewError(
+                f"packet exceeds per-file cap: {rel} is {size} bytes "
+                f"(cap {MAX_FILE_BYTES}); failing closed")
+        included.append((rel, data))
+        inventory.append(f"- {rel}: {size} bytes (inlined)")
+        if len(included) > MAX_OUTPUT_FILES:
+            raise DvcReviewError(
+                f"packet exceeds file cap ({MAX_OUTPUT_FILES} files); "
+                f"failing closed")
+    return included, inventory
+
+
+def do_packet(workdir) -> dict:
+    """Assemble the fixed file set under .pipeline/packets/<hash>/.
+
+    The directory name is the packet's own content hash, so the builder
+    cannot swap what the reviewer sees without changing the path.
     """
-    if round_name not in ROUND_PATTERNS:
-        raise ValueError(f"unknown goldfish round {round_name!r} (rounds: {', '.join(ROUNDS)})")
-    if tokens is not None and tokens:
-        if tokens.pop(0).startswith("F"):
-            return [f"OBJECTION {round_name}: stubbed objection -- "
-                    f"artifact says nothing about {ROUND_EXPECTED[round_name]}."]
-        return []
-    artifact = f"{spec_text}\n{plan_text}"
-    if not ROUND_PATTERNS[round_name].search(artifact):
-        return [f"OBJECTION {round_name}: spec+plan say nothing about "
-                f"{ROUND_EXPECTED[round_name]}."]
-    return []
+    workdir = Path(workdir)
+    cfg = _config()
+    files = _packet_files(workdir)
+    digest = hashlib.sha256(f"{FORMAT_PACKET}\n".encode())
+    manifest_files = []
+    total = 0
+    for rel, data in files:
+        digest.update(f"{rel}\n{len(data)}\n".encode() + data)
+        tokens = _est_tokens(data)
+        total += tokens
+        manifest_files.append({"path": rel, "bytes": len(data),
+                               "tokens": tokens, "sha256": _sha(data)})
+    packet_hash = digest.hexdigest()[:16]
+    if total > cfg["max_tokens"]:
+        listing = "\n".join(
+            f"  {f['path']}: {f['bytes']} bytes (~{f['tokens']} tokens)"
+            for f in manifest_files)
+        raise DvcReviewError(
+            f"packet exceeds goldfish cap ({total} > {cfg['max_tokens']} "
+            f"tokens); failing closed:\n{listing}")
+    dest = workdir / PACKETS_REL / packet_hash
+    dest.mkdir(parents=True, exist_ok=True)
+    for rel, data in files:
+        target = dest / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
+    manifest = {"format": FORMAT_PACKET, "packet_hash": packet_hash,
+                "files": manifest_files, "tokens_total": total,
+                "cap": cfg["max_tokens"],
+                "created_at": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
+    (dest / "manifest.json").write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8")
+    return {"packet_hash": packet_hash, "files": len(files),
+            "tokens": total, "dir": str(dest)}
 
+
+def _verify_packet(packet_dir: Path, manifest: dict):
+    """Refuse a swapped packet: every file must match its recorded hash."""
+    for f in manifest["files"]:
+        data = (packet_dir / f["path"]).read_bytes()
+        if _sha(data) != f["sha256"]:
+            raise DvcReviewError(
+                f"packet file changed on disk: {f['path']} "
+                f"(expected {f['sha256'][:12]}, refusing swapped packet)")
+
+
+# ---------- brief + call ----------
+
+def load_brief_template() -> str:
+    path = REPO_ROOT / "templates" / "goldfish-packet.md"
+    if not path.is_file():
+        raise DvcReviewError(
+            "missing templates/goldfish-packet.md (repo install incomplete)")
+    return path.read_text(encoding="utf-8")
+
+
+def build_brief(rounds: list[str]) -> str:
+    """Fill the template with ONLY the stage and round list. The elephant
+    cannot add prose: this is the whole system prompt."""
+    lines = []
+    for r in rounds:
+        lines.append(f"ROUND {r}: {ROUND_EXPECTED[r]}.")
+    tmpl = load_brief_template()
+    brief = tmpl.replace("{{STAGE}}", "teardown").replace(
+        "{{ROUNDS}}", "\n".join(lines) + "\n")
+    leftover = re.search(r"{{[A-Z_]+}}", brief)
+    if leftover:
+        raise DvcReviewError(
+            "goldfish-packet.md template has unfilled placeholders")
+    return brief
+
+
+def _stub_response(rounds, verdict: str) -> str:
+    if verdict == "pass":
+        return "".join(f"ROUND {r}: PASS — stubbed pass.\n" for r in rounds)
+    return "".join(
+        f"ROUND {r}: FAIL — objection: the artifact says nothing about "
+        f"{ROUND_EXPECTED[r]}.\n" for r in rounds)
+
+
+def _provider_call(cfg: dict, model: str, system: str,
+                   user: str) -> tuple[str, str, int, int]:
+    key = os.environ.get(cfg["key_env"], "")
+    if not key:
+        raise DvcReviewError(
+            f"no provider key reachable ({cfg['key_env']} is unset); "
+            f"goldfish rounds cannot run — failing closed")
+    payload = json.dumps({"model": model,
+                          "messages": [{"role": "system", "content": system},
+                                       {"role": "user", "content": user}],
+                          "temperature": 0}).encode()
+    req = urllib.request.Request(
+        cfg["base_url"].rstrip("/") + "/chat/completions", data=payload,
+        headers={"Content-Type": "application/json",
+                 "Authorization": f"Bearer {key}"})
+    import ssl as _ssl
+    ctx = _ssl.create_default_context()
+    try:
+        with urllib.request.urlopen(req, timeout=120, context=ctx) as resp:
+            raw = resp.read()
+    except Exception as exc:
+        raise DvcReviewError(
+            f"goldfish provider call failed ({exc}); failing closed"
+        ) from None
+    try:
+        body = json.loads(raw.decode("utf-8"))
+        text = body["choices"][0]["message"]["content"]
+        usage = body.get("usage") or {}
+        rid = str(body.get("id") or "")
+    except (ValueError, KeyError, IndexError, TypeError):
+        raise DvcReviewError(
+            "goldfish provider returned an unparseable response; "
+            "failing closed") from None
+    tin = int(usage.get("prompt_tokens") or _est_tokens(
+        (system + user).encode()))
+    tout = int(usage.get("completion_tokens") or _est_tokens(text.encode()))
+    return text, rid, tin, tout
+
+
+def _inline_packet(packet_dir: Path, manifest: dict) -> str:
+    """The user message: the packet inlined as delimited files. Nothing else
+    is in the request — no chat, no memory, no builder notes."""
+    parts = []
+    for f in manifest["files"]:
+        data = (packet_dir / f["path"]).read_bytes()
+        parts.append(f"===== FILE {f['path']} =====\n"
+                     + data.decode("utf-8", errors="replace"))
+    return "\n".join(parts) + "\n"
+
+
+def _request_envelope(model: str, brief: str, manifest: dict) -> dict:
+    return {"model": model, "system": brief,
+            "user_files": [{"path": f["path"], "sha256": f["sha256"],
+                            "bytes": f["bytes"]} for f in manifest["files"]],
+            "tools": []}
+
+
+def _request_hash(model: str, brief: str, packet_dir: Path,
+                  manifest: dict) -> str:
+    digest = hashlib.sha256(
+        f"{FORMAT_CALL}\n{model}\n".encode() + brief.encode() + b"\n[]\n")
+    _verify_packet(packet_dir, manifest)  # refuse a swapped packet first
+    for f in manifest["files"]:
+        digest.update((packet_dir / f["path"]).read_bytes())
+    return digest.hexdigest()
+
+
+def parse_verdicts(text: str, rounds: list[str]) -> dict[str, tuple[str, str]]:
+    """Map each requested round to (verdict, objection). Missing rounds, or
+    a round the reviewer cannot judge, fail closed."""
+    found: dict[str, tuple[str, str]] = {}
+    for line in text.splitlines():
+        m = ROUND_LINE_RE.match(line.strip())
+        if m and m.group(1).lower() in rounds:
+            found[m.group(1).lower()] = (m.group(2).upper(),
+                                         m.group(3).strip())
+    missing = [r for r in rounds if r not in found]
+    if missing:
+        raise DvcReviewError(
+            f"goldfish response names no verdict for round(s) "
+            f"{', '.join(missing)}; recorded as-is and the round does not "
+            f"pass:\n{text.strip()[:2000]}")
+    out = {}
+    for r, (verdict, note) in found.items():
+        if "cannot judge" in note.lower() or "can't judge" in note.lower():
+            out[r] = ("FAIL", f"reviewer states it cannot judge: {note}")
+        else:
+            out[r] = (verdict, note)
+    return out
+
+
+def do_review_run(workdir, rounds: list[str]) -> dict:
+    """One packet + one model call covering all rounds. Returns the recorded
+    call (verdicts, packet path, envelope, raw response)."""
+    workdir = Path(workdir)
+    cfg = _config()
+    pkt = do_packet(workdir)
+    packet_dir = Path(pkt["dir"])
+    manifest = json.loads((packet_dir / "manifest.json").read_text(
+        encoding="utf-8"))
+    brief = build_brief(rounds)
+    brief_hash = _sha(brief.encode())
+    stub = None
+    tokens = _stub_tokens()
+    if tokens is not None:
+        tok = tokens.pop(0) if tokens else "P"
+        text = _stub_response(rounds, "pass" if tok.startswith("P") else "fail")
+        rid = ""
+        tin = _est_tokens(brief.encode())
+        tout = _est_tokens(text.encode())
+        stub = tok
+    else:
+        user_msg = _inline_packet(packet_dir, manifest)
+        text, rid_base, tin, tout = _provider_call(
+            cfg, cfg["model"], brief, user_msg)
+        rid = rid_base
+    request_hash = _request_hash(cfg["model"], brief, packet_dir, manifest)
+    try:
+        verdicts = parse_verdicts(text, rounds)
+    except DvcReviewError as exc:
+        verdicts = {r: ("FAIL", str(exc)) for r in rounds}
+    try:
+        seq = max([int(p.stem.split("-")[-1])
+                   for p in (workdir / REVIEWS_REL).glob("call-*.json")]
+                  + [0]) + 1
+    except ValueError:
+        seq = 1
+    if stub is not None:
+        rid = f"stub-{seq:04d}"
+    rec = {"format": FORMAT_CALL, "rounds": list(rounds),
+           "packet_hash": pkt["packet_hash"], "packet_dir": pkt["dir"],
+           "brief_hash": brief_hash, "request_hash": request_hash,
+           "request": _request_envelope(cfg["model"], brief, manifest),
+           "response": text, "model": cfg["model"],
+           "provider_request_id": rid or f"stub-{seq:04d}",
+           "tokens_in": tin, "tokens_out": tout,
+           "results": {r: {"verdict": v.lower(), "note": n}
+                       for r, (v, n) in verdicts.items()},
+           "created_at": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
+    if not rec["provider_request_id"]:
+        rec["provider_request_id"] = f"stub-{seq:04d}"
+    base = workdir / REVIEWS_REL
+    base.mkdir(parents=True, exist_ok=True)
+    (base / f"call-{seq:04d}.json").write_text(
+        json.dumps(rec, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return rec
+
+
+# ---------- loop + state (stop rules unchanged) ----------
 
 def state_path_for(workdir):
     return Path(workdir) / STATE_REL
@@ -174,73 +536,89 @@ def format_failure(state, rule, round_name):
     return "\n".join(lines)
 
 
-def run_loop(workdir, read_artifact, elephant_respond, run_id):
-    """Run rounds until no objections (PASS) or a stop rule fires (FAIL).
+def _spec_sha(workdir):
+    try:
+        data = (Path(workdir) / ".pipeline" / "to-spec.md").read_bytes()
+    except OSError:
+        return "?"
+    return _sha(data)
 
-    ``read_artifact`` -> (spec_text, plan_text), re-read fresh every review.
-    ``elephant_respond``(round, objections) -> response text; it may append
-    to the plan/teardown notes but MUST NOT touch the spec.
-    Returns the state dict (outcome.result is PASS or FAIL).
+
+def run_loop(workdir, elephant_respond, run_id):
+    """Run rounds until no objection (PASS) or a stop rule fires (FAIL).
+
+    Each iteration assembles a fresh packet from the workdir and makes one
+    model call covering every round. ``elephant_respond``(round,
+    objections) reworks the artifact on disk (never the spec) and returns
+    a response text. Returns the state dict (outcome.result is PASS/FAIL).
     """
     workdir = Path(workdir)
-    tokens = _stub_tokens()
     state = new_state(run_id)
     seq = 0
     while True:
-        for rnd in ROUNDS:
-            spec_text, plan_text = read_artifact()
-            objections = judge_artifact(spec_text, plan_text, rnd, tokens)
+        try:
+            call = do_review_run(workdir, list(ROUNDS))
+        except DvcReviewError as exc:
+            seq += 1
+            rnd = ROUNDS[0]
             st = state["per_round"][rnd]
             st["attempts"] += 1
+            st["fails_consec"] += 1
+            state["total_failures"] += 1
+            state["verdicts"].append({
+                "seq": seq, "round": rnd, "verdict": "FAIL",
+                "spec_sha": _spec_sha(workdir),
+                "packet_hash": None,
+                "objections": [str(exc)],
+                "elephant_response": "no rework possible; review error",
+                "round_fails_consec": st["fails_consec"],
+            })
+            save_state(workdir, state)
+            state["outcome"] = {"result": "FAIL", "rule": "review-error",
+                                "round": rnd, "run_id": run_id,
+                                "failures_total": state["total_failures"]}
+            save_state(workdir, state)
+            print(format_failure(state, f"review error: {exc}", rnd),
+                  flush=True)
+            return state
+        spec_sha = _spec_sha(workdir)
+        failed_rounds = [r for r in ROUNDS
+                         if call["results"][r]["verdict"] != "pass"]
+        for rnd in ROUNDS:
             seq += 1
-            spec_sha = _sha(spec_text)
-            if not objections:
+            st = state["per_round"][rnd]
+            st["attempts"] += 1
+            res = call["results"][rnd]
+            if res["verdict"] == "pass":
                 st["fails_consec"] = 0
                 state["verdicts"].append({
                     "seq": seq, "round": rnd, "verdict": "PASS",
-                    "spec_sha": spec_sha, "objections": [],
+                    "spec_sha": spec_sha,
+                    "packet_hash": call["packet_hash"],
+                    "objections": [],
                     "elephant_response": None,
                 })
                 save_state(workdir, state)
                 print(f"goldfish {rnd}: no objection "
-                      f"(attempt {st['attempts']}, spec {_short(spec_sha)})",
-                      flush=True)
+                      f"(attempt {st['attempts']}, spec {_short(spec_sha)}, "
+                      f"packet {call['packet_hash'][:12]})", flush=True)
                 continue
+            ob = (f"OBJECTION {rnd}: {res['note']}"
+                  if res["note"] else f"OBJECTION {rnd}: no reason given.")
+            print(ob, flush=True)
             st["fails_consec"] += 1
             state["total_failures"] += 1
-            for ob in objections:
-                print(ob, flush=True)
-            response = elephant_respond(rnd, objections)
+            response = elephant_respond(rnd, [ob])
             state["verdicts"].append({
                 "seq": seq, "round": rnd, "verdict": "FAIL",
-                "spec_sha": spec_sha, "objections": list(objections),
+                "spec_sha": spec_sha,
+                "packet_hash": call["packet_hash"],
+                "objections": [ob],
                 "elephant_response": response,
                 "round_fails_consec": st["fails_consec"],
             })
             save_state(workdir, state)
-            if st["fails_consec"] >= SAME_ROUND_LIMIT:
-                state["outcome"] = {"result": "FAIL", "rule": "same-round",
-                                    "round": rnd, "run_id": run_id,
-                                    "failures_total": state["total_failures"]}
-                save_state(workdir, state)
-                print(format_failure(state, "same-round rule: "
-                                     f"'{rnd}' failed twice, no third attempt",
-                                     rnd), flush=True)
-                return state
-            if state["total_failures"] >= TOTAL_FAILURE_CAP:
-                state["outcome"] = {"result": "FAIL", "rule": "total-cap",
-                                    "round": rnd, "run_id": run_id,
-                                    "failures_total": state["total_failures"]}
-                save_state(workdir, state)
-                print(format_failure(state, "total failure cap: "
-                                     f"{state['total_failures']} failures "
-                                     f"(cap {TOTAL_FAILURE_CAP})", rnd),
-                      flush=True)
-                return state
-            print(f"elephant responds on {rnd} (attempt {st['attempts']}); "
-                  f"re-reviewing from the top", flush=True)
-            break  # rework may have broken earlier passes: restart
-        else:
+        if not failed_rounds:
             state["outcome"] = {"result": "PASS", "run_id": run_id,
                                 "rounds": list(ROUNDS),
                                 "failures_total": state["total_failures"]}
@@ -249,33 +627,53 @@ def run_loop(workdir, read_artifact, elephant_respond, run_id):
                   f"{state['total_failures']} objection(s) answered, "
                   f"run {run_id}", flush=True)
             return state
+        first = failed_rounds[0]
+        st = state["per_round"][first]
+        if st["fails_consec"] >= SAME_ROUND_LIMIT:
+            state["outcome"] = {"result": "FAIL", "rule": "same-round",
+                                "round": first, "run_id": run_id,
+                                "failures_total": state["total_failures"]}
+            save_state(workdir, state)
+            print(format_failure(state, "same-round rule: "
+                                 f"'{first}' failed twice, no third attempt",
+                                 first), flush=True)
+            return state
+        if state["total_failures"] >= TOTAL_FAILURE_CAP:
+            state["outcome"] = {"result": "FAIL", "rule": "total-cap",
+                                "round": first, "run_id": run_id,
+                                "failures_total": state["total_failures"]}
+            save_state(workdir, state)
+            print(format_failure(state, "total failure cap: "
+                                 f"{state['total_failures']} failures "
+                                 f"(cap {TOTAL_FAILURE_CAP})", first),
+                  flush=True)
+            return state
+        print("elephant reworks the artifact; "
+              "re-reviewing from the top", flush=True)
+        # loop: fresh packet, fresh call; consecutive counts persist.
 
 
 def make_run_id():
     return (f"{int(time.time())}x{os.getpid()}x{random.randint(0, 65535):04x}")
 
 
-def cmd_review(args):
-    """Ad-hoc blind review: reads ONLY the two given files, prints
-    objections (or nothing = pass). Always exits 0 -- a review objects,
-    it never fails."""
-    spec_text = Path(args.spec).read_text(encoding="utf-8")
-    plan_text = Path(args.plan).read_text(encoding="utf-8")
-    for ob in judge_artifact(spec_text, plan_text, args.round):
-        print(ob)
+def cmd_packet(args):
+    """Assemble a packet for a workdir; print its path and hash."""
+    pkt = do_packet(args.workdir)
+    print(f"packet: {pkt['dir']}")
+    print(f"hash: {pkt['packet_hash']} "
+          f"({pkt['files']} files, ~{pkt['tokens']} tokens)")
     return 0
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Blind goldfish review (no approve)")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    p = sub.add_parser("review", help="blind-review two files for one round")
-    p.add_argument("--round", required=True, choices=list(ROUNDS))
-    p.add_argument("--spec", required=True)
-    p.add_argument("--plan", required=True)
+    p = sub.add_parser("packet", help="assemble the hash-locked review packet")
+    p.add_argument("--workdir", default=".")
     ns = ap.parse_args(argv)
-    if ns.cmd == "review":
-        return cmd_review(ns)
+    if ns.cmd == "packet":
+        return cmd_packet(ns)
     return 2
 
 

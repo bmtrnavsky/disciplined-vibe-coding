@@ -27,7 +27,9 @@ SPEC_REL = ".pipeline/to-spec.md"
 LOCK_REL = ".pipeline/spec.lock"
 PLANS_REL = ".pipeline/plans"
 GOLDFISH_REL = ".pipeline/goldfish.json"
-TEARDOWN_REL = ".pipeline/teardown.md"
+TEARDOWN_REL = ".pipeline/teardown.md"  # legacy scratch file (pre-fix-A runs only)
+PACKETS_REL = ".pipeline/packets"
+REVIEWS_REL = ".pipeline/reviews/goldfish"
 WAYFINDER_REL = ".pipeline/wayfinder.md"
 GATE_ORDER = ("G1", "G2", "G3", "G4", "G5", "G6")
 
@@ -97,10 +99,14 @@ def _section1(workdir, rec):
     else:
         lines.append(f"- Build: `{rec['build_cmd']}` "
                      f"exited {rec['build_rc']}")
-    made = [p for p in (SPEC_REL, LOCK_REL, TEARDOWN_REL, GOLDFISH_REL,
+    made = [p for p in (SPEC_REL, LOCK_REL, GOLDFISH_REL,
                         WAYFINDER_REL)
             if (workdir / p).is_file()]
     made += [f"{PLANS_REL}/{p.name}" for p in plans]
+    packets = sorted((workdir / PACKETS_REL).iterdir()) if (workdir / PACKETS_REL).is_dir() else []
+    made += [f"{PACKETS_REL}/{p.name}/" for p in packets if p.is_dir()]
+    calls = sorted((workdir / REVIEWS_REL).glob("call-*.json")) if (workdir / REVIEWS_REL).is_dir() else []
+    made += [f"{REVIEWS_REL}/{c.name}" for c in calls]
     # The report itself: it exists by the time anyone reads this.
     made.append(REPORT_REL)
     lines.append(f"- Outputs on disk: {', '.join(made) if made else 'none'}")
@@ -186,6 +192,10 @@ def _section4(state):
                      f"'{out.get('round')}' failed "
                      f"{state.get('same_round_limit', 2)} times in a row, "
                      "no third attempt.")
+    elif out.get("rule") == "review-error":
+        lines.append("- Ending: stopped by a review error -- the packet or "
+                     "provider was unusable, so the round could not pass "
+                     "(fail closed, never a silent pass).")
     else:
         lines.append("- Ending: stopped by the total cap -- "
                      f"{out.get('failures_total', fails)} failures "

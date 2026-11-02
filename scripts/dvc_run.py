@@ -5,6 +5,10 @@ completion without stopping: no password prompt, no approval step, no
 `input()` anywhere. The run ends by itself — it finishes (exit 0) or a
 failed build command stops it (exit 1). It never waits for a human.
 
+Order is Define → Plan → Build → Teardown(review) → Verify (fix A):
+the goldfish reviews the build output, not a plan. A reviewer that never
+sees what was built cannot review the build.
+
 Spec record is advisory only: the spec is hashed at Define via
 `spec_lock.cmd_lock`, and Verify re-hashes and prints a drift line when
 the spec moved mid-run. Drift is visibility, never a block.
@@ -37,10 +41,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import spec_lock  # noqa: E402  (stdlib-only sibling; hash/record logic reused)
 import dvc_gates  # noqa: E402  (automatic checks for every pipeline gate)
-import dvc_goldfish  # noqa: E402  (blind review loop: rounds, judge, stop rules)
+import dvc_goldfish  # noqa: E402  (SDDA-shaped packet + one-shot review)
 import dvc_report  # noqa: E402  (end-of-run report Brad reads afterwards)
 
-STAGES = ("Define", "Plan", "Teardown", "Build", "Verify")
+STAGES = ("Define", "Plan", "Build", "Teardown", "Verify")
 DEFAULT_SPEC = ".pipeline/to-spec.md"
 
 
@@ -93,55 +97,19 @@ def cmd_plan(workdir, job):
     print(f"plan: {plan.relative_to(workdir).as_posix()}", flush=True)
 
 
-def plan_text_for(workdir):
-    plans = sorted((workdir / ".pipeline" / "plans").glob("*.md"))
-    parts = []
-    for p in plans:
-        try:
-            parts.append(p.read_text(encoding="utf-8"))
-        except OSError:
-            continue
-    parts.append(teardown_notes_text(workdir))
-    return "\n".join(parts)
-
-
-def teardown_notes_text(workdir):
-    try:
-        return (workdir / ".pipeline" / "teardown.md").read_text(encoding="utf-8")
-    except OSError:
-        return ""
-
-
-def cmd_teardown(workdir, run_id):
-    # Goldfish loop (card 2): the reviewer is blind -- it receives only
-    # the spec + plan bytes, never the implementation, never chat history.
+def cmd_teardown_review(workdir, run_id):
+    # Goldfish (fix A): the reviewer assembles a hash-locked packet of
+    # spec + plan + BUILD OUTPUT and reviews it with one model call per
+    # iteration (SDDA-shaped). It runs AFTER Build, because a reviewer
+    # that never sees what was built cannot review the build. Rework =
+    # new build output on disk; the loop never touches the spec.
     stage("Teardown")
-    (workdir / ".pipeline" / "teardown.md").write_text(
-        "# Teardown (goldfish notes)\n\n"
-        "- consequence: building exactly this spec changes only the workdir;\n"
-        "  breaks if the job needs anything outside the workdir.\n"
-        "- alternatives: doing nothing is the other option; building is\n"
-        "  strongest because the run stays reversible inside the workdir.\n",
-        encoding="utf-8",
-    )
-
-    def read_artifact():
-        return (
-            (workdir / DEFAULT_SPEC).read_text(encoding="utf-8"),
-            plan_text_for(workdir),
-        )
 
     def elephant_respond(round_name, objections):  # noqa: ARG001
-        # Rework = new teardown line answering the round. Never touches the
-        # spec: the loop must not loosen what it reviews to force a pass.
-        note = (f"\n- rework ({round_name}): the workdir-only consequence and\n"
-                f"  the doing-nothing alternative both stand; restated for review.\n")
-        with open(workdir / ".pipeline" / "teardown.md", "a", encoding="utf-8") as fh:
-            fh.write(note)
-        return ("restated the workdir-only consequence and the "
-                "doing-nothing alternative; spec untouched")
+        return ("rework recorded as new build output on disk; "
+                "spec untouched")
 
-    state = dvc_goldfish.run_loop(workdir, read_artifact, elephant_respond, run_id)
+    state = dvc_goldfish.run_loop(workdir, elephant_respond, run_id)
     return state
 
 
@@ -179,6 +147,16 @@ def cmd_build(workdir, build_cmd):
     print(proc.stdout, end="", flush=True)
     print(proc.stderr, end="", file=sys.stderr, flush=True)
     print(f"build: exit {proc.returncode}", flush=True)
+    # Execution evidence the reviewer can see: the packet carries the
+    # build output, so the command and its captured output are recorded
+    # as a workdir file (a reviewer that never sees what was built, or
+    # that it ran at all, cannot review the build).
+    (workdir / "build-log.txt").write_text(
+        f"$ {build_cmd}\nexit: {proc.returncode}\n"
+        f"--- stdout ---\n{proc.stdout}"
+        f"--- stderr ---\n{proc.stderr}",
+        encoding="utf-8",
+    )
     return proc.returncode
 
 
@@ -189,7 +167,7 @@ def cmd_verify(workdir, rec, locked_hash, gates_passed):
     stage("Verify")
     if gates_passed:
         gate_or_stop(workdir, rec, "G6", "verify/done-claim-mapped", True,
-                     "Define, Plan, Teardown, Build all passed; this Verify maps to them",
+                     "Define, Plan, Build, Teardown all passed; this Verify maps to them",
                      "run end", record=False)
     else:
         # Unreachable through main() — earlier stops return first — but a
@@ -264,37 +242,37 @@ def main(argv=None):
                                    f"(plan/shaped): {why}. "
                                    "It stopped before Teardown."}
         return finish(workdir, rec, 1)
-    state = cmd_teardown(workdir, run_id)
+    rc = cmd_build(workdir, ns.build)
+    rec["build_rc"] = rc
+    ok, why = dvc_gates.check_build(rc, bool(ns.build))
+    if not gate_or_stop(workdir, rec, "G5", "build/proof-green",
+                        ok, why, "Teardown(review)"):
+        rec["stop"] = {"result": "FAILED",
+                       "sentence": "The run failed at Build: the build "
+                                   f"command exited {rc}. "
+                                   "It stopped before the goldfish review."}
+        print("STOP: build command failed; run ends here.", flush=True)
+        return finish(workdir, rec, 1)
+    state = cmd_teardown_review(workdir, run_id)
     rec["goldfish_state"] = state
     if state["outcome"]["result"] != "PASS":
         gate_or_stop(workdir, rec, "G4", "teardown/goldfish-pass", False,
                      "goldfish loop ended in FAILURE (see objections above)",
-                     "Build")
+                     "Verify")
         rule = state["outcome"].get("rule", "?")
         rnd = state["outcome"].get("round", "?")
         rec["stop"] = {"result": "FAILED",
                        "sentence": "The run failed at Teardown: the goldfish "
                                    f"stopped it by the {rule} rule on round "
-                                   f"'{rnd}'. Build never started."}
-        print("STOP: goldfish loop ended in FAILURE; Build never starts.",
+                                   f"'{rnd}'. It stopped before Verify."}
+        print("STOP: goldfish loop ended in FAILURE; Verify never runs.",
               flush=True)
         return finish(workdir, rec, 1)
     gate_or_stop(workdir, rec, "G4", "teardown/goldfish-pass", True,
-                 "goldfish loop PASS, no standing objection", "Build")
-    rc = cmd_build(workdir, ns.build)
-    rec["build_rc"] = rc
-    ok, why = dvc_gates.check_build(rc, bool(ns.build))
-    if not gate_or_stop(workdir, rec, "G5", "build/proof-green",
-                        ok, why, "Verify"):
-        rec["stop"] = {"result": "FAILED",
-                       "sentence": "The run failed at Build: the build "
-                                   f"command exited {rc}. "
-                                   "It stopped before Verify."}
-        print("STOP: build command failed; run ends here.", flush=True)
-        return finish(workdir, rec, 1)
+                 "goldfish loop PASS, no standing objection", "Verify")
     rec["gates"].append({"id": "G6", "name": "verify/done-claim-mapped",
                         "outcome": "PASS",
-                        "reason": "Define, Plan, Teardown, Build all passed; "
+                        "reason": "Define, Plan, Build, Teardown all passed; "
                                   "this Verify maps to them"})
     cmd_verify(workdir, rec, locked_hash, True)
     rec["stop"] = {"result": "SUCCEEDED",
