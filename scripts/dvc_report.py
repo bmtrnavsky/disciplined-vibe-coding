@@ -31,7 +31,7 @@ TEARDOWN_REL = ".pipeline/teardown.md"  # legacy scratch file (pre-fix-A runs on
 PACKETS_REL = ".pipeline/packets"
 REVIEWS_REL = ".pipeline/reviews/goldfish"
 WAYFINDER_REL = ".pipeline/wayfinder.md"
-GATE_ORDER = ("G1", "G2", "G3", "G4", "G5", "G6")
+GATE_ORDER = ("G1", "G2", "G3", "G4", "G5", "G6", "G7")
 
 
 def new_record(job):
@@ -93,6 +93,12 @@ def _section1(workdir, rec):
         lines.append("- Plan: none written (the run stopped before Plan)")
     if rec["build_rc"] is None:
         lines.append("- Build: never ran")
+    elif rec["build_rc"] == "not-built":
+        lines.append("- Build: NOT BUILT -- no --build command given; "
+                     "nothing executed, the goldfish never ran")
+    elif rec["build_rc"] == "timeout":
+        lines.append(f"- Build: `{rec['build_cmd']}` TIMED OUT and was "
+                     f"killed (DVC_BUILD_TIMEOUT)")
     elif not rec["build_cmd"]:
         lines.append("- Build: no --build command (skeleton); "
                      "nothing executed")

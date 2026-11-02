@@ -1,12 +1,15 @@
-"""DVC spec lock — hash the build spec at Define, note drift in run output.
+"""DVC spec lock — hash the build spec at Define, declare mid-run changes.
 
 Usage (run with the workdir as cwd):
     python spec_lock.py lock [--spec REL]            hash spec, write .pipeline/spec.lock
     python spec_lock.py check [--spec REL]           exit 0 clean / 1 drift / 2 lock broken
     python spec_lock.py declare --by NAME --why TXT re-hash spec, append declaration
 
-Advisory only: nothing here blocks a run. `dvc_run.py` hashes at Define
-and prints a drift line at Verify; drift is visibility, never a gate.
+Declared drift is visibility: `declare` re-hashes with who/when/why and
+the run passes (gate G7). Undeclared drift fails the run at Verify
+(gate G7 spec-stable in scripts/dvc_gates.py) — a build that rewrites
+the spec is caught there, never waved through. This module only
+records; the run enforces.
 There is no pre_tool_call hook — the 8ba8aaa blocking hook was removed
 on purpose (autonomous runs must never wait on a human). Reads were
 never gated and still aren't.

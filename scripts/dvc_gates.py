@@ -16,17 +16,25 @@ Gate table (id, what it means, status, check):
   G4 teardown/goldfish-pass  blind review raised no standing objection
       AUTO: dvc_goldfish.run_loop outcome is PASS (card 2 stop rules)
   G5 build/proof-green       the build proof passed
-      AUTO: --build command exited 0; with no --build command the run
-      records pass-with-note "skeleton; nothing executed" (nothing to prove)
+      AUTO: --build command exited 0. With no --build command the run
+      FAILS as NOT BUILT: a run that built nothing must never read as a
+      pass. A build that timed out fails and names the timeout.
   G6 verify/done-claim-mapped  the run may only finish via Verify
       AUTO: Verify is reached only if G1-G5 all passed (asserted from the
       in-run gate record, not assumed); drift line printed either way
+  G7 verify/spec-stable      the spec still matches Define, or a mid-run
+      change was declared via `spec_lock.py declare`
+      AUTO: current spec hash equals the Define lock, or the lock was
+      re-hashed with a declaration naming who and why. Undeclared drift
+      fails the run at Verify. (Fix B: a build that rewrites the spec to
+      "do nothing" no longer reads as SUCCEEDED.)
 
 Advisory (evaluated by no machine check; labelled ADVISORY in run output):
 
-  A1 spec-drift          spec changed mid-run. Advisory by design (SKILL.md
-      section 5c): a legitimate change may be declared mid-run, so drift
-      is visibility, never a block.
+  A1 spec-drift          a DECLARED mid-run change. Advisory by design
+      (SKILL.md section 5c): declaring who/why is legitimate, so it stays
+      visibility, never a block. UNDECLARED drift is not advisory — it
+      fails gate G7 at Verify.
   A2 step-up/blast-radius  rung steps up when blast radius grows. Needs
       judgment of what counts as irreversible or production — the run
       cannot tell a workdir scratch file from a production touch.
@@ -55,9 +63,15 @@ LOCK_REL = ".pipeline/spec.lock"
 PLANS_REL = ".pipeline/plans"
 WAYFINDER_REL = ".pipeline/wayfinder.md"
 
+# Longest a build may run before the run kills it and fails. An
+# unattended overnight run must never hang on a prompt or a stuck
+# command; override with DVC_BUILD_TIMEOUT (seconds) for probes.
+BUILD_TIMEOUT_S = 1800
+
 ADVISORIES = (
     ("A1", "spec-drift",
-     "drift is visibility by design (SKILL.md 5c); a declared change is legitimate"),
+     "a DECLARED change (lock re-hashed with who/why) is visibility; "
+     "undeclared drift fails gate G7 at Verify"),
     ("A2", "step-up/blast-radius",
      "judging irreversible/production blast radius needs a human; the run cannot tell"),
     ("A3", "intake interview",
@@ -109,12 +123,51 @@ def check_plan_shaped(workdir):
 
 
 def check_build(returncode, had_command):
-    """G5: build proof green (or honestly skeleton)."""
+    """G5: build proof green. No build command is NOT BUILT (not a pass)."""
     if not had_command:
-        return True, "no --build command (skeleton); nothing executed"
+        return False, "NOT BUILT: no --build command; nothing executed"
+    if returncode == "timeout":
+        return False, (f"build timed out after {BUILD_TIMEOUT_S}s; "
+                       "killed so an unattended run cannot hang")
     if returncode == 0:
         return True, "build command exit 0"
     return False, f"build command exit {returncode}"
+
+
+def check_spec_stable(workdir, locked_hash):
+    """G7: spec still matches Define, or a change was declared.
+
+    Declared = the lock was re-hashed via `declare --by NAME --why REASON`
+    (the lock carries who/when/why). Anything else that moves the spec
+    mid-run — including a build that rewrites it — fails here.
+    """
+    workdir = Path(workdir)
+    try:
+        from spec_lock import sha256_file, read_lock, lock_path_for, _short
+    except ImportError:  # pragma: no cover - repo layout broken
+        return False, "spec lock module unavailable"
+    try:
+        current = sha256_file(workdir / SPEC_REL)
+    except OSError as exc:
+        return False, f"spec unreadable ({exc})"
+    if current == locked_hash:
+        return True, f"spec unchanged since Define (sha256:{_short(current)})"
+    try:
+        lock = read_lock(lock_path_for(workdir))
+    except (OSError, ValueError):
+        return False, (f"spec drift: spec changed mid-run "
+                       f"(lock {_short(locked_hash)} != "
+                       f"current {_short(current)}) with no declaration")
+    decls = lock.get("declarations") or []
+    if lock.get("sha256") == current and decls:
+        last = decls[-1]
+        return True, (f"spec changed mid-run but declared by "
+                      f"{last.get('by')}: {last.get('why')}")
+    return False, (f"spec drift: spec changed mid-run "
+                   f"(lock {_short(locked_hash)} != current "
+                   f"{_short(current)}) with no declaration; "
+                   f"declare it via `spec_lock.py declare --by NAME "
+                   f"--why REASON`")
 
 
 def wayfinder_append(workdir, stage, result, reason):

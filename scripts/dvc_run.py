@@ -9,22 +9,34 @@ Order is Define → Plan → Build → Teardown(review) → Verify (fix A):
 the goldfish reviews the build output, not a plan. A reviewer that never
 sees what was built cannot review the build.
 
-Spec record is advisory only: the spec is hashed at Define via
-`spec_lock.cmd_lock`, and Verify re-hashes and prints a drift line when
-the spec moved mid-run. Drift is visibility, never a block.
+No build command means NOT BUILT (fix B): a run with no --build built
+nothing, so it cannot pass — the run stops at Build with result
+NOT BUILT, exit 2, and the goldfish never runs. Undeclared spec drift
+at Verify fails gate G7 (fix B): a build that rewrites the spec to
+"do nothing" is caught here, not waved through as SUCCEEDED. A declared
+change (`spec_lock.py declare --by NAME --why REASON`) still passes.
+
+The build can never hang on a prompt (fix B): stdin is closed
+(subprocess.DEVNULL) and the command is killed after the timeout
+(DVC_BUILD_TIMEOUT, default 30 min). A timed-out build fails the run.
+
+Spec record (fix B amends the old advisory-only rule): the spec is
+hashed at Define via `spec_lock.cmd_lock`, declared changes are
+re-hashed with who/why, and Verify fails undeclared drift at gate G7.
+Declared drift stays visibility, never a block.
 
 Gates (card 3): every gate the pipeline claims is evaluated by the run
 itself via `dvc_gates.py` — G1 spec-locked, G2 rung-declared, G3
-plan-shaped, G4 goldfish-pass, G5 proof-green, G6 done-claim-mapped.
-A failed gate stops the run and names the gate. What no machine check
-can evaluate stays labelled ADVISORY in the Verify output (A1-A6),
-with the plain reason why.
+plan-shaped, G4 goldfish-pass, G5 proof-green, G6 done-claim-mapped,
+G7 spec-stable (fix B). A failed gate stops the run and names the
+gate. What no machine check can evaluate stays labelled ADVISORY in
+the Verify output (A1-A6), with the plain reason why.
 
-Report (card 4): every exit — success or stop — writes
+Report (card 4): every exit — success, FAILED, or NOT BUILT — writes
 `.pipeline/run-report.md` via `dvc_report.py` and prints
 `report: <path>` as the last line, so Brad can find what happened
-without having watched. A stopped run says FAILED in plain words,
-never "completed with notes".
+without having watched. A stopped run says FAILED or NOT BUILT in
+plain words, never "completed with notes".
 
 Usage:
     python scripts/dvc_run.py --job "one-line job description"
@@ -32,6 +44,7 @@ Usage:
 """
 
 import argparse
+import os
 import subprocess
 import sys
 import time
@@ -137,60 +150,121 @@ def advisory_lines():
             for aid, name, why in dvc_gates.ADVISORIES]
 
 
+def _build_timeout():
+    """Seconds before the build is killed. DVC_BUILD_TIMEOUT overrides."""
+    try:
+        return max(1, int(os.environ.get("DVC_BUILD_TIMEOUT", "") or
+                          dvc_gates.BUILD_TIMEOUT_S))
+    except ValueError:
+        return dvc_gates.BUILD_TIMEOUT_S
+
+
+def _kill_tree(proc):
+    """Kill the build and anything it spawned.
+
+    `shell=True` starts a shell with the real command as its child; on a
+    timeout killing only the shell leaves the grandchild holding the
+    pipes open, and the run waits anyway. So the whole tree dies:
+    taskkill /T on Windows, killpg on POSIX.
+    """
+    try:
+        if os.name == "nt":
+            subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                           capture_output=True, timeout=30)
+        else:
+            os.killpg(proc.pid, 15)
+    except Exception:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+
+
 def cmd_build(workdir, build_cmd):
     stage("Build")
+    timeout = _build_timeout()
     if not build_cmd:
-        print("build: no --build command (skeleton); nothing executed", flush=True)
-        return 0
-    proc = subprocess.run(build_cmd, shell=True, cwd=workdir,
-                          capture_output=True, text=True)
-    print(proc.stdout, end="", flush=True)
-    print(proc.stderr, end="", file=sys.stderr, flush=True)
-    print(f"build: exit {proc.returncode}", flush=True)
+        # NOT BUILT (fix B): the "skeleton" run built nothing, so it
+        # stops here. Returning a sentinel the gate refuses keeps the
+        # "no builder in that path" case from ever reading as a pass.
+        print("build: no --build command; NOT BUILT, stopping before "
+              "Teardown(review)", flush=True)
+        return "not-built"
+    # Popen (not run): on timeout the tree must die before communicate()
+    # returns, or a grandchild holding the pipes keeps the run waiting.
+    new_session = os.name != "nt"
+    flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) \
+        if os.name == "nt" else 0
+    proc = subprocess.Popen(build_cmd, shell=True, cwd=workdir,
+                            stdin=subprocess.DEVNULL,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
+                            text=True,
+                            start_new_session=new_session,
+                            creationflags=flags)
+    try:
+        # stdin closed (fix B): a build asking for input gets EOF, never
+        # an overnight hang. The timeout kills a stuck command instead of
+        # waiting for morning.
+        out, err = proc.communicate(timeout=timeout)
+        rc = proc.returncode
+    except subprocess.TimeoutExpired:
+        _kill_tree(proc)
+        try:
+            out, err = proc.communicate(timeout=30)
+        except subprocess.TimeoutExpired:
+            out, err = "", ""
+        (workdir / "build-log.txt").write_text(
+            f"$ {build_cmd}\nexit: timeout after {timeout}s\n"
+            f"--- stdout ---\n{out or ''}"
+            f"--- stderr ---\n{err or ''}", encoding="utf-8")
+        print(f"build: TIMED OUT after {timeout}s; killed — failing the "
+              f"run (DVC_BUILD_TIMEOUT={timeout})", flush=True)
+        return "timeout"
+    print(out, end="", flush=True)
+    print(err, end="", file=sys.stderr, flush=True)
+    print(f"build: exit {rc}", flush=True)
     # Execution evidence the reviewer can see: the packet carries the
     # build output, so the command and its captured output are recorded
     # as a workdir file (a reviewer that never sees what was built, or
     # that it ran at all, cannot review the build).
     (workdir / "build-log.txt").write_text(
-        f"$ {build_cmd}\nexit: {proc.returncode}\n"
-        f"--- stdout ---\n{proc.stdout}"
-        f"--- stderr ---\n{proc.stderr}",
+        f"$ {build_cmd}\nexit: {rc}\n"
+        f"--- stdout ---\n{out}"
+        f"--- stderr ---\n{err}",
         encoding="utf-8",
     )
-    return proc.returncode
+    return rc
 
 
 def cmd_verify(workdir, rec, locked_hash, gates_passed):
     # G6 done-claim-mapped: Verify is reached only because every earlier
     # gate passed. The caller asserts this from the in-run record; Verify
     # re-states it so a reader can see the mapping without trusting flow.
+    # G7 spec-stable (fix B): undeclared drift FAILS the run here. A
+    # build that rewrote the spec to "do nothing" is caught by this
+    # gate — Verify returns False and the caller reports FAILED.
     stage("Verify")
-    if gates_passed:
-        gate_or_stop(workdir, rec, "G6", "verify/done-claim-mapped", True,
-                     "Define, Plan, Build, Teardown all passed; this Verify maps to them",
-                     "run end", record=False)
-    else:
+    gate_or_stop(workdir, rec, "G6", "verify/done-claim-mapped",
+                 gates_passed,
+                 "Define, Plan, Build, Teardown all passed; this Verify maps to them"
+                 if gates_passed else
+                 "Verify reached with an earlier gate unpassed",
+                 "run end", record=False)
+    if not gates_passed:
         # Unreachable through main() — earlier stops return first — but a
         # caller that bypasses the chain must still be named, not trusted.
-        gate_or_stop(workdir, rec, "G6", "verify/done-claim-mapped", False,
-                     "Verify reached with an earlier gate unpassed", "run end",
-                     record=False)
-        return
+        return False
     for line in advisory_lines():
         print(line, flush=True)
-    try:
-        current = spec_lock.sha256_file(workdir / DEFAULT_SPEC)
-    except OSError as exc:
-        # A1 advisory: a missing spec is reported, never blocks the run end.
-        print(f"spec drift: spec unreadable ({exc}); "
-              f"lock was {spec_lock._short(locked_hash)}", flush=True)
-        return
-    if current != locked_hash:
-        print(f"spec drift: spec changed mid-run "
-              f"(lock {spec_lock._short(locked_hash)} != "
-              f"current {spec_lock._short(current)})", flush=True)
-    else:
-        print(f"spec clean sha256:{spec_lock._short(current)}", flush=True)
+    ok, why = dvc_gates.check_spec_stable(workdir, locked_hash)
+    gate_or_stop(workdir, rec, "G7", "verify/spec-stable", ok, why,
+                 "run end")
+    if ok:
+        print(f"spec stable: {why}", flush=True)
+        return True
+    print(f"spec drift: {why}", flush=True)
+    return False
 
 
 def main(argv=None):
@@ -244,6 +318,33 @@ def main(argv=None):
         return finish(workdir, rec, 1)
     rc = cmd_build(workdir, ns.build)
     rec["build_rc"] = rc
+    if rc == "not-built":
+        # NOT BUILT (fix B): no builder in this path, so nothing may
+        # pass. Exit 2 (not 1) so it never reads as a build failure
+        # either — it is the absence of a build. The goldfish never runs.
+        gate_or_stop(workdir, rec, "G5", "build/proof-green", False,
+                     "NOT BUILT: no --build command; nothing executed",
+                     "Teardown(review)")
+        rec["stop"] = {
+            "result": "NOT BUILT",
+            "sentence": ("The run built nothing: no --build command was "
+                         "given, so no builder ran. It stopped at Build "
+                         "before the goldfish review.")}
+        print("STOP: NOT BUILT — no --build command; run ends here.",
+              flush=True)
+        return finish(workdir, rec, 2)
+    if rc == "timeout":
+        gate_or_stop(workdir, rec, "G5", "build/proof-green", False,
+                     f"build timed out after {_build_timeout()}s; killed "
+                     "so an unattended run cannot hang",
+                     "Teardown(review)")
+        rec["stop"] = {
+            "result": "FAILED",
+            "sentence": (f"The run failed at Build: the build command "
+                         f"timed out after {_build_timeout()}s and was "
+                         f"killed. It stopped before the goldfish review.")}
+        print("STOP: build timed out; run ends here.", flush=True)
+        return finish(workdir, rec, 1)
     ok, why = dvc_gates.check_build(rc, bool(ns.build))
     if not gate_or_stop(workdir, rec, "G5", "build/proof-green",
                         ok, why, "Teardown(review)"):
@@ -274,9 +375,18 @@ def main(argv=None):
                         "outcome": "PASS",
                         "reason": "Define, Plan, Build, Teardown all passed; "
                                   "this Verify maps to them"})
-    cmd_verify(workdir, rec, locked_hash, True)
+    if not cmd_verify(workdir, rec, locked_hash, True):
+        # G7 spec-stable (fix B): undeclared drift — e.g. a build that
+        # rewrote the spec to "do nothing" — fails the run at Verify.
+        rec["stop"] = {"result": "FAILED",
+                       "sentence": "The run failed at Verify: the spec "
+                                   "moved mid-run with no declaration. "
+                                   "It stopped at the end, not as a pass."}
+        print("STOP: undeclared spec drift; run ends here as FAILED.",
+              flush=True)
+        return finish(workdir, rec, 1)
     rec["stop"] = {"result": "SUCCEEDED",
-                   "sentence": "The run succeeded: all six gates passed "
+                   "sentence": "The run succeeded: all seven gates passed "
                                "and the goldfish raised no standing "
                                "objection."}
     print(f"[Verify] done in {time.time() - t0:.1f}s — "

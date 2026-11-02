@@ -64,11 +64,13 @@ this hook deliberately doesn't use, since the goal here is a nudge visible to
 the model and the operator, not a gate that can misfire and block real work
 on a false positive.
 
-## 2. spec record (advisory; never blocks)
+## 2. spec record (declared drift is advisory; undeclared drift fails)
 
-`dvc_run.py` hashes the spec at Define (`spec_lock.py lock`) and prints a
-drift line at Verify when the hash moved mid-run. No hook, no prompt,
-no block — drift is visibility only.
+`dvc_run.py` hashes the spec at Define (`spec_lock.py lock`).
+A declared change (`declare --by NAME --why REASON`) re-hashes with
+who/when/why — visibility only, never a block. A change with no
+declaration fails the run at Verify (gate G7 spec-stable). No hook,
+no prompt — the run enforces it, not a person.
 
 ```sh
 python spec_lock.py lock                              # Define: hash the spec
@@ -77,8 +79,8 @@ python spec_lock.py declare --by NAME --why REASON    # record a change
 ```
 
 - Lock lives at `.pipeline/spec.lock`: spec path, sha256, declarations.
-- Drift prints a `spec drift: ... lock <hash> != current <hash>` line in
-  the run output and the run continues to its end.
-- Missing/unreadable lock or spec prints a warning line, never stops.
+- Undeclared drift prints a `spec drift: ... lock <hash> != current <hash>`
+  line and fails the run at Verify (gate G7) — never a silent pass.
+- Missing/unreadable lock or spec fails gate G7 at Verify, never a warning.
 - Declared drift re-hashes, appending who/when/why plus old/new hashes —
-  the record is visible in the lock, never silent.
+  the record is visible in the lock, never silent; it stays advisory.

@@ -11,12 +11,20 @@ check() { # $1 = description, $2 = file, $3 = fixed string
   else fail=$((fail+1)); echo "FAIL: $1 ($2)"; fi
 }
 check "gate enforcement" plugins/disciplined-vibe-coding/SKILL.md "A failed gate blocks the next stage"
-check "spec record advisory" plugins/disciplined-vibe-coding/SKILL.md "Spec record (advisory"
-check "spec record hook doc" HOOKS.md "spec record (advisory"
+check "spec record declared advisory" plugins/disciplined-vibe-coding/SKILL.md "declared drift is advisory; undeclared drift fails"
+check "spec record hook doc" HOOKS.md "spec record (declared drift is advisory"
+check "not built wired" scripts/dvc_run.py "NOT BUILT"
+check "stdin closed" scripts/dvc_run.py "stdin=subprocess.DEVNULL"
+check "build timeout" scripts/dvc_run.py "DVC_BUILD_TIMEOUT"
+check "g7 gate" scripts/dvc_gates.py "G7 verify/spec-stable"
+check "g7 check" scripts/dvc_gates.py "def check_spec_stable"
+check "not built gate" scripts/dvc_gates.py "NOT BUILT"
+check "report not built" scripts/dvc_report.py "NOT BUILT"
+check "report gate G7" scripts/dvc_report.py '"G7"'
 if grep -qF "pre_tool_call" "$ROOT/__init__.py"; then fail=$((fail+1)); echo "FAIL: blocking hook still registered (__init__.py)"; else pass=$((pass+1)); fi
 if grep -qF "on_pre_tool_call" "$ROOT/spec_lock.py"; then fail=$((fail+1)); echo "FAIL: blocking hook still present (spec_lock.py)"; else pass=$((pass+1)); fi
 check "lock tool present" spec_lock.py "def cmd_lock"
-check "advisory wording" spec_lock.py "Advisory only"
+check "declared drift stays visible" spec_lock.py "Declared drift is visibility"
 check "declare path" spec_lock.py "declarations"
 check "run entry present" scripts/dvc_run.py "zero human input"
 check "bypass logging" plugins/disciplined-vibe-coding/SKILL.md "logged in the Wayfinder result"

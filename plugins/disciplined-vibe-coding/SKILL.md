@@ -48,8 +48,9 @@ fixing it is an explicit user bypass, logged in the Wayfinder result
 who approved, what was red, and why it was waived. An unlogged
 bypass is a pipeline defect, counted the same as a skipped stage. A
 gate that slows the builder gets fixed; it never gets silently skipped.
-Since card series DVC 1/4 the spec record is advisory: `dvc_run.py` hashes
-the spec at Define and prints a drift line at Verify. Nothing blocks.
+Since card series DVC 1/4 the spec record is hashed at Define, and fix B
+made it a gate: `dvc_run.py` hashes the spec at Define, declared drift
+stays advisory, and undeclared drift fails the run at Verify (G7).
 
 ## Stage map (pipeline stage → skill that owns it)
 
@@ -202,13 +203,14 @@ with zero re-brief.
 - Spec lock: `.pipeline/spec.lock` — sha256 at Define, declarations on
   change (`spec_lock.py lock` / `declare --by NAME --why REASON`).
 
-### 5c. Spec record (advisory, never a gate)
+### 5c. Spec record (declared drift is advisory; undeclared drift fails)
 
-`dvc_run.py` hashes the to-spec at Define (`spec_lock.py lock`) and
-prints a drift line at Verify when the hash moved mid-run. Nothing
-blocks: no hook, no prompt, no fail-closed. A legitimate change may
-still be declared (`declare --by NAME --why REASON`), which re-hashes
-and appends who/when/why to the lock. Verify quotes the result.
+`dvc_run.py` hashes the to-spec at Define (`spec_lock.py lock`).
+A mid-run change declared (`declare --by NAME --why REASON`) re-hashes
+and appends who/when/why to the lock — advisory, never a block, and
+Verify quotes the result. A change with no declaration fails the run
+at Verify (gate G7 spec-stable): a build that rewrites the spec to
+"do nothing" is caught there, never waved through as a pass.
 
 ## v0.2.0 resolutions
 
