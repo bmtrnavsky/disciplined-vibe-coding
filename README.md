@@ -6,8 +6,9 @@
 [![Hermes Plugin](https://img.shields.io/badge/Hermes-Plugin-teal.svg)](https://hermes-agent.nousresearch.com/docs)
 [![Version](https://img.shields.io/badge/version-0.2.0-orange.svg)](plugins/disciplined-vibe-coding/CHANGELOG.md)
 
-> Enforcement (v0.3.0 slice 1, unreleased): the spec lock is real — the
-> plugin blocks build-tool calls on undeclared spec drift. See `HOOKS.md` §2.
+> Advisory spec record (card series DVC 1/4): `dvc_run.py` hashes the spec
+> at Define and prints a drift line at Verify when it moved mid-run.
+> Nothing blocks; see `HOOKS.md` §2.
 
 A lean skill pack + persona for any coding agent (built for Hermes;
 portable to any agent that supports skill files). For someone who wants to

@@ -64,11 +64,11 @@ this hook deliberately doesn't use, since the goal here is a nudge visible to
 the model and the operator, not a gate that can misfire and block real work
 on a false positive.
 
-## 2. spec-lock (pre_tool_call; blocks undeclared spec drift)
+## 2. spec record (advisory; never blocks)
 
-Registered automatically by the plugin's `register()` — no shell-hook wiring,
-no approval prompt. Guards `write_file`, `patch`, and `terminal` (the
-mutation surface; reads are never gated).
+`dvc_run.py` hashes the spec at Define (`spec_lock.py lock`) and prints a
+drift line at Verify when the hash moved mid-run. No hook, no prompt,
+no block — drift is visibility only.
 
 ```sh
 python spec_lock.py lock                              # Define: hash the spec
@@ -77,10 +77,8 @@ python spec_lock.py declare --by NAME --why REASON    # record a change
 ```
 
 - Lock lives at `.pipeline/spec.lock`: spec path, sha256, declarations.
-- Undeclared drift → `{"action": "block", "message": "... lock <hash> !=
-  current <hash> ..."}` naming both hashes plus the declare command.
-- Missing/unreadable lock or spec → blocks (fail closed).
+- Drift prints a `spec drift: ... lock <hash> != current <hash>` line in
+  the run output and the run continues to its end.
+- Missing/unreadable lock or spec prints a warning line, never stops.
 - Declared drift re-hashes, appending who/when/why plus old/new hashes —
-  the bypass is visible in the lock, never silent.
-- Workdirs without `.pipeline/` are never gated, so non-DVC sessions keep
-  working with the plugin installed.
+  the record is visible in the lock, never silent.

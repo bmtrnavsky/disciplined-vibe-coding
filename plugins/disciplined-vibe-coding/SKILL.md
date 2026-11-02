@@ -48,8 +48,8 @@ fixing it is an explicit user bypass, logged in the Wayfinder result
 who approved, what was red, and why it was waived. An unlogged
 bypass is a pipeline defect, counted the same as a skipped stage. A
 gate that slows the builder gets fixed; it never gets silently skipped.
-Since v0.3.0 one gate is actually enforced: the spec-lock `pre_tool_call`
-hook (§6.5) refuses build-tool calls on undeclared spec drift.
+Since card series DVC 1/4 the spec record is advisory: `dvc_run.py` hashes
+the spec at Define and prints a drift line at Verify. Nothing blocks.
 
 ## Stage map (pipeline stage → skill that owns it)
 
@@ -202,15 +202,13 @@ with zero re-brief.
 - Spec lock: `.pipeline/spec.lock` — sha256 at Define, declarations on
   change (`spec_lock.py lock` / `declare --by NAME --why REASON`).
 
-### 5c. Spec-lock gate (enforced, not advisory)
+### 5c. Spec record (advisory, never a gate)
 
-At Define, `python spec_lock.py lock` hashes the to-spec into
-`.pipeline/spec.lock`. The plugin's `pre_tool_call` hook (§2 of `HOOKS.md`)
-refuses `write_file`/`patch`/`terminal` calls while the spec hash has moved
-without a recorded declaration, and fails closed when the lock or spec is
-missing or unreadable. A legitimate change is declared, never silent:
-`python spec_lock.py declare --by NAME --why REASON` re-hashes and appends
-who/when/why to the lock. Verify re-runs `check` and quotes the result.
+`dvc_run.py` hashes the to-spec at Define (`spec_lock.py lock`) and
+prints a drift line at Verify when the hash moved mid-run. Nothing
+blocks: no hook, no prompt, no fail-closed. A legitimate change may
+still be declared (`declare --by NAME --why REASON`), which re-hashes
+and appends who/when/why to the lock. Verify quotes the result.
 
 ## v0.2.0 resolutions
 
