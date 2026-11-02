@@ -1,0 +1,18 @@
+dvc_run: job='gate proof failing build' workdir=.turing\proof\g3-g5fail
+[Define]
+locked .pipeline/to-spec.md sha256:ecb7591cbb03
+run: 1793624783x1540900xc005
+GATE PASS: G1 define/spec-locked — spec present and lock recorded.
+GATE PASS: G2 economy/rung-declared — rung sentence declared in to-spec.
+[Plan]
+plan: .pipeline/plans/01-gate-proof-failing-build.md
+GATE PASS: G3 plan/shaped — 01-gate-proof-failing-build.md: 4 non-empty lines.
+[Teardown]
+goldfish consequence: no objection (attempt 1, spec 004746442050)
+goldfish alternatives: no objection (attempt 1, spec 004746442050)
+goldfish loop: PASS -- 2 rounds, 0 objection(s) answered, run 1793624783x1540900xc005
+GATE PASS: G4 teardown/goldfish-pass — goldfish loop PASS, no standing objection.
+[Build]
+build: exit 3
+GATE FAIL: G5 build/proof-green — build command exit 3. Stopping before Verify.
+STOP: build command failed; run ends here.

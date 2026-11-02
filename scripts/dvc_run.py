@@ -9,8 +9,14 @@ Spec record is advisory only: the spec is hashed at Define via
 `spec_lock.cmd_lock`, and Verify re-hashes and prints a drift line when
 the spec moved mid-run. Drift is visibility, never a block.
 
-Later cards own the rest: gates (card 3), run report (card 4).
-Teardown below runs the blind goldfish loop (card 2): the reviewer sees
+Gates (card 3): every gate the pipeline claims is evaluated by the run
+itself via `dvc_gates.py` — G1 spec-locked, G2 rung-declared, G3
+plan-shaped, G4 goldfish-pass, G5 proof-green, G6 done-claim-mapped.
+A failed gate stops the run and names the gate. What no machine check
+can evaluate stays labelled ADVISORY in the Verify output (A1-A6),
+with the plain reason why.
+
+Teardown runs the blind goldfish loop (card 2): the reviewer sees
 only the spec + plan bytes, never the implementation; objections return
 as new work; two straight failures on one round or three total failures
 stop the run with a failure report.
@@ -29,6 +35,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import spec_lock  # noqa: E402  (stdlib-only sibling; hash/record logic reused)
+import dvc_gates  # noqa: E402  (automatic checks for every pipeline gate)
 import dvc_goldfish  # noqa: E402  (blind review loop: rounds, judge, stop rules)
 
 STAGES = ("Define", "Plan", "Teardown", "Build", "Verify")
@@ -51,6 +58,7 @@ def cmd_define(workdir, job):
     spec.parent.mkdir(parents=True, exist_ok=True)
     spec.write_text(
         f"# To-spec (micro)\n\nJob: {job}\n\n"
+        "rung: micro-spec, reversible single-file change inside the workdir.\n"
         "Assumptions: defaults taken, no questions asked (autonomous run).\n",
         encoding="utf-8",
     )
@@ -128,25 +136,55 @@ def cmd_teardown(workdir, run_id):
     return state["outcome"]["result"] == "PASS"
 
 
+def gate_or_stop(workdir, gate_id, name, ok, reason, next_stage):
+    """Evaluate one gate: pass records PASS, fail records FAIL and stops."""
+    dvc_gates.wayfinder_append(workdir, gate_id, "PASS" if ok else "FAIL", reason)
+    if ok:
+        print(f"GATE PASS: {gate_id} {name} — {reason}.", flush=True)
+        return True
+    print(dvc_gates.fail_report(gate_id, name, reason, next_stage), flush=True)
+    return False
+
+
+def advisory_lines():
+    return [f"ADVISORY {aid} {name}: {why}."
+            for aid, name, why in dvc_gates.ADVISORIES]
+
+
 def cmd_build(workdir, build_cmd):
     stage("Build")
     if not build_cmd:
         print("build: no --build command (skeleton); nothing executed", flush=True)
-        return True
+        return 0
     proc = subprocess.run(build_cmd, shell=True, cwd=workdir,
-                           capture_output=True, text=True)
+                          capture_output=True, text=True)
     print(proc.stdout, end="", flush=True)
     print(proc.stderr, end="", file=sys.stderr, flush=True)
     print(f"build: exit {proc.returncode}", flush=True)
-    return proc.returncode == 0
+    return proc.returncode
 
 
-def cmd_verify(workdir, locked_hash):
+def cmd_verify(workdir, locked_hash, gates_passed):
+    # G6 done-claim-mapped: Verify is reached only because every earlier
+    # gate passed. The caller asserts this from the in-run record; Verify
+    # re-states it so a reader can see the mapping without trusting flow.
     stage("Verify")
+    if gates_passed:
+        gate_or_stop(workdir, "G6", "verify/done-claim-mapped", True,
+                     "Define, Plan, Teardown, Build all passed; this Verify maps to them",
+                     "run end")
+    else:
+        # Unreachable through main() — earlier stops return first — but a
+        # caller that bypasses the chain must still be named, not trusted.
+        gate_or_stop(workdir, "G6", "verify/done-claim-mapped", False,
+                     "Verify reached with an earlier gate unpassed", "run end")
+        return
+    for line in advisory_lines():
+        print(line, flush=True)
     try:
         current = spec_lock.sha256_file(workdir / DEFAULT_SPEC)
     except OSError as exc:
-        # Advisory: a missing spec is reported, never blocks the run end.
+        # A1 advisory: a missing spec is reported, never blocks the run end.
         print(f"spec drift: spec unreadable ({exc}); "
               f"lock was {spec_lock._short(locked_hash)}", flush=True)
         return
@@ -174,15 +212,31 @@ def main(argv=None):
         return 1
     run_id = dvc_goldfish.make_run_id()
     print(f"run: {run_id}", flush=True)
+    ok, why = dvc_gates.check_spec_locked(workdir)
+    if not gate_or_stop(workdir, "G1", "define/spec-locked", ok, why, "Plan"):
+        return 1
+    ok, why = dvc_gates.check_rung_declared(workdir)
+    if not gate_or_stop(workdir, "G2", "economy/rung-declared", ok, why, "Plan"):
+        return 1
     cmd_plan(workdir, ns.job)
+    ok, why = dvc_gates.check_plan_shaped(workdir)
+    if not gate_or_stop(workdir, "G3", "plan/shaped", ok, why, "Teardown"):
+        return 1
     if not cmd_teardown(workdir, run_id):
+        gate_or_stop(workdir, "G4", "teardown/goldfish-pass", False,
+                     "goldfish loop ended in FAILURE (see objections above)",
+                     "Build")
         print("STOP: goldfish loop ended in FAILURE; Build never starts.",
               flush=True)
         return 1
-    if not cmd_build(workdir, ns.build):
+    gate_or_stop(workdir, "G4", "teardown/goldfish-pass", True,
+                 "goldfish loop PASS, no standing objection", "Build")
+    rc = cmd_build(workdir, ns.build)
+    ok, why = dvc_gates.check_build(rc, bool(ns.build))
+    if not gate_or_stop(workdir, "G5", "build/proof-green", ok, why, "Verify"):
         print("STOP: build command failed; run ends here.", flush=True)
         return 1
-    cmd_verify(workdir, locked_hash)
+    cmd_verify(workdir, locked_hash, True)
     print(f"[Verify] done in {time.time() - t0:.1f}s — "
           f"Define through Verify, zero human input.", flush=True)
     return 0

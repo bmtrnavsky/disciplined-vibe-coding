@@ -1,0 +1,25 @@
+dvc_run: job='gate proof failing teardown' workdir=.turing\proof\g3-g4fail
+[Define]
+locked .pipeline/to-spec.md sha256:60d9e28c8ab1
+run: 1793624801x1539380x8cdb
+GATE PASS: G1 define/spec-locked — spec present and lock recorded.
+GATE PASS: G2 economy/rung-declared — rung sentence declared in to-spec.
+[Plan]
+plan: .pipeline/plans/01-gate-proof-failing-teardown.md
+GATE PASS: G3 plan/shaped — 01-gate-proof-failing-teardown.md: 4 non-empty lines.
+[Teardown]
+OBJECTION consequence: stubbed objection -- artifact says nothing about what happens if we build exactly this, and where it breaks.
+elephant responds on consequence (attempt 1); re-reviewing from the top
+OBJECTION consequence: stubbed objection -- artifact says nothing about what happens if we build exactly this, and where it breaks.
+STOP: goldfish loop ends -- FAILURE (same-round rule: 'consequence' failed twice, no third attempt).
+round that could not pass: consequence
+run: 1793624801x1539380x8cdb (failures total 2, cap 3; round consecutive 2 of 2)
+objections (verbatim):
+  - OBJECTION consequence: stubbed objection -- artifact says nothing about what happens if we build exactly this, and where it breaks.
+  - OBJECTION consequence: stubbed objection -- artifact says nothing about what happens if we build exactly this, and where it breaks.
+what the elephant tried in response:
+  - after 'consequence' failure 1 of 2: restated the workdir-only consequence and the doing-nothing alternative; spec untouched
+  - after 'consequence' failure 2 of 2: restated the workdir-only consequence and the doing-nothing alternative; spec untouched
+spec hashes across these failures: cf523fefbb86, cf523fefbb86 (count keyed by round within run 1793624801x1539380x8cdb; amendment does not reset it)
+GATE FAIL: G4 teardown/goldfish-pass — goldfish loop ended in FAILURE (see objections above). Stopping before Build.
+STOP: goldfish loop ended in FAILURE; Build never starts.

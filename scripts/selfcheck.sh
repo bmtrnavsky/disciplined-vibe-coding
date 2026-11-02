@@ -36,6 +36,15 @@ check "stub gated" scripts/dvc_goldfish.py "DVC_TEST_MODE"
 check "loop wired" scripts/dvc_run.py "goldfish loop ended in FAILURE"
 check "run id" scripts/dvc_run.py "run_id = dvc_goldfish.make_run_id"
 check "no third attempt" scripts/dvc_goldfish.py "no third attempt"
+check "gates module" scripts/dvc_gates.py "ADVISORIES = ("
+check "gate G1 wired" scripts/dvc_run.py "define/spec-locked"
+check "gate G2 wired" scripts/dvc_run.py "economy/rung-declared"
+check "gate G3 wired" scripts/dvc_run.py "plan/shaped"
+check "gate G4 named" scripts/dvc_run.py "teardown/goldfish-pass"
+check "gate G5 wired" scripts/dvc_run.py "build/proof-green"
+check "gate G6 mapped" scripts/dvc_run.py "verify/done-claim-mapped"
+check "gate fail names" scripts/dvc_gates.py "GATE FAIL"
+check "advisory labelled" scripts/dvc_run.py "ADVISORY"
 if bash -n "$ROOT/hooks/readcheck.sh"; then pass=$((pass+1));
 else fail=$((fail+1)); echo "FAIL: hooks/readcheck.sh syntax"; fi
 if python -m py_compile "$ROOT/__init__.py" 2>/dev/null; then pass=$((pass+1));
