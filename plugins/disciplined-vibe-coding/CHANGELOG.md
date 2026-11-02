@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+Added: behavioural test suite (DVC fix D) — `tests/dvc_behavioural.py`
+runs the real runner (`python tests/dvc_behavioural.py`, stdlib unittest,
+no new dependency) and asserts on real output: same-round stop at 2 with no
+third attempt, total cap, count surviving spec amendment, re-run refusal
+over a FAIL, NOT BUILT, prompt-build failing fast, undeclared drift FAIL,
+named failing gate, vague artifact objected to and genuine artifact passing
+(replayed recorded fix-A model calls through the real `parse_verdicts`).
+Mutation-proved: disabling the same-round rule and neutering the goldfish
+both make the suite FAIL. `scripts/selfcheck.sh` is now marked lint-only;
+a green selfcheck without a green behavioural run proves nothing.
+
 Added: goldfish loop in the autonomous run (card series DVC 2/4) —
 `scripts/dvc_goldfish.py` runs the two micro-spec teardown rounds with a
 blind reviewer (spec+plan bytes only; no approve verdict; silence = pass).

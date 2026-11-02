@@ -1,0 +1,2 @@
+ROUND consequence: PASS — `risk-review.md` details the limits of the taken path, noting that if an outage outlasts the ~3s of waits, fetch gives up and the caller eats the error.
+ROUND alternatives: PASS — `risk-review.md` evaluates "No second attempt at all" and "Keep trying forever", explaining why the taken path of 3 attempts beats them using evidence from the probe log.

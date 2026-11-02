@@ -1,5 +1,14 @@
 #!/usr/bin/env bash
-# scripts/selfcheck.sh — acceptance checks for the STORM must-fix panel.
+# scripts/selfcheck.sh — LINT-ONLY. It greps sources for strings; it does NOT
+# verify behaviour and a green run here proves nothing about the runner.
+# Opus proved this: with the goldfish neutered and the same-round rule
+# disabled, this script still reported green.
+#
+# The behavioural suite is tests/dvc_behavioural.py. It executes the real
+# runner and asserts on real output (exit codes, reports, stop rules).
+#   python tests/dvc_behavioural.py
+# A green result from THIS script without a green behavioural run means nothing.
+# Acceptance checks (lint): the STORM must-fix panel strings are present.
 # Six checks: gate enforcement/bypass logging, teardown second-failure
 # rule, rung step-up rule, goldfish hardening, 1.0 bar measurement,
 # secret-scanning line. Plus syntax sanity (hook compiles, python compiles).

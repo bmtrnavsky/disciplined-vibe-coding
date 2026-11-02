@@ -68,7 +68,9 @@ called finished.
     UPDATE.md             update contract: shipped paths read-only to you, user edits in user/
     scripts/update.sh     updater for manual checkouts only (catalog installs: `hermes plugins update disciplined-vibe-coding`)
     user/                 your overlay — customizations live here, never touched by updates
-    scripts/selfcheck.sh  acceptance checks for the pipeline's hard rules
+    scripts/selfcheck.sh  lint-only string checks (proves nothing alone)
+    tests/dvc_behavioural.py  behavioural tests: runs the real runner,
+                              asserts on real output (`python tests/dvc_behavioural.py`)
     HOOKS.md              optional shell hook for research-freshness nudges
     hooks/                the one hook this pack ships
     skills/               the ten skills that make up the loop
