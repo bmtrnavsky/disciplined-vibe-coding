@@ -32,15 +32,22 @@ G7 spec-stable (fix B). A failed gate stops the run and names the
 gate. What no machine check can evaluate stays labelled ADVISORY in
 the Verify output (A1-A6), with the plain reason why.
 
-Report (card 4): every exit — success, FAILED, or NOT BUILT — writes
+Report (card 4/4): every exit — success, FAILED, or NOT BUILT — writes
 `.pipeline/run-report.md` via `dvc_report.py` and prints
 `report: <path>` as the last line, so Brad can find what happened
 without having watched. A stopped run says FAILED or NOT BUILT in
 plain words, never "completed with notes".
 
+History (fix C): every finished run appends to `.pipeline/runs.json`
+(run id, outcome, round count), and the report cites all of them. A
+second run over a FAILED run refuses to start -- it names the prior
+failure and exits 3 -- unless `--fresh` is passed. A crash writes a
+FAILED report instead of leaving the previous run's report on disk.
+
 Usage:
     python scripts/dvc_run.py --job "one-line job description"
     python scripts/dvc_run.py --job "..." --workdir PATH --build "make test"
+    python scripts/dvc_run.py --job "..." --workdir PATH --fresh
 """
 
 import argparse
@@ -272,15 +279,40 @@ def main(argv=None):
     ap.add_argument("--job", required=True, help="one-line job description")
     ap.add_argument("--workdir", default=".", help="build workdir")
     ap.add_argument("--build", default="", help="optional build command")
+    ap.add_argument("--fresh", action="store_true",
+                    help="start a new run even over a FAILED one; "
+                         "the new run cites it in the history")
     ns = ap.parse_args(argv)
 
     workdir = Path(ns.workdir)
     t0 = time.time()
+    # Refuse to start over a FAILED run (fix C): retrying with tweaked
+    # text until green must not erase the failure from the record.
+    if not ns.fresh:
+        prior = dvc_report.last_failed_run(workdir)
+        if prior is not None:
+            print(dvc_report.refusal_text(prior), flush=True)
+            print(f"prior report: {workdir / dvc_report.REPORT_REL}",
+                  flush=True)
+            return 3
     rec = dvc_report.new_record(ns.job)
     rec["advisories"] = dvc_gates.ADVISORIES
     rec["build_cmd"] = ns.build
     print(f"dvc_run: job={ns.job!r} workdir={workdir}", flush=True)
+    try:
+        return _run(ns, workdir, rec, t0)
+    except Exception as exc:
+        # A crash must not leave the previous run's report on disk as
+        # the newest: write FAILED now, naming the crash.
+        rec["stop"] = {
+            "result": "FAILED",
+            "sentence": (f"The run crashed before it could finish ({exc}); "
+                         "nothing after this point ran.")}
+        print(f"CRASH: {exc}; writing a FAILED report.", flush=True)
+        return finish(workdir, rec, 1)
 
+
+def _run(ns, workdir, rec, t0):
     locked_hash = cmd_define(workdir, ns.job)
     if locked_hash is None:
         rec["stop"] = {"result": "FAILED",

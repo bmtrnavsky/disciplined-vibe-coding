@@ -1,7 +1,7 @@
 """End-of-run report for the autonomous DVC run (card 4/4).
 
 Brad is not watching while the run goes, so this file is the only thing
-he sees afterwards. It answers seven questions in plain words:
+he sees afterwards. It answers eight questions in plain words:
 
 1. What was built -- the job, the spec that governed it, what came out.
 2. What the goldfish objected to -- every objection, quoted verbatim.
@@ -10,6 +10,7 @@ he sees afterwards. It answers seven questions in plain words:
 5. Which gates ran and the outcome of each (pass, fail, advisory).
 6. Whether the spec moved mid-run -- when and by how much.
 7. Why the run stopped, in one plain sentence.
+8. Which runs came before -- every run in this workdir, oldest first.
 
 The report never overstates: a run stopped by a stop rule says FAILED,
 never "completed with notes". It is written to
@@ -31,6 +32,7 @@ TEARDOWN_REL = ".pipeline/teardown.md"  # legacy scratch file (pre-fix-A runs on
 PACKETS_REL = ".pipeline/packets"
 REVIEWS_REL = ".pipeline/reviews/goldfish"
 WAYFINDER_REL = ".pipeline/wayfinder.md"
+RUNS_REL = ".pipeline/runs.json"  # fix C: append-only run history
 GATE_ORDER = ("G1", "G2", "G3", "G4", "G5", "G6", "G7")
 
 
@@ -286,18 +288,99 @@ def render(workdir, rec):
              _section4(rec["goldfish_state"]), [""],
              _section5(rec), [""],
              _section6(workdir, rec), [""],
-             ["## 7. Why it stopped", "", rec["stop"]["sentence"], ""]]
+             ["## 7. Why it stopped", "", rec["stop"]["sentence"], ""],
+             [""],
+             _section8_history(rec.get("history") or []), [""]]
     out = []
     for p in parts:
         out.extend(p)
     return "\n".join(out).rstrip() + "\n"
 
 
+def load_history(workdir):
+    """Every recorded run in this workdir, oldest first. Never raises."""
+    try:
+        raw = (Path(workdir) / RUNS_REL).read_text(encoding="utf-8")
+        rows = json.loads(raw)
+    except (OSError, ValueError):
+        return []
+    return rows if isinstance(rows, list) else []
+
+
+def last_failed_run(workdir):
+    """The latest run if it failed, else None.
+
+    Only the newest entry blocks: a SUCCEEDED run after an old FAIL
+    clears the coast. Anything else lets a stale FAIL block fresh
+    work forever, which is a different bug.
+    """
+    rows = [r for r in load_history(workdir) if isinstance(r, dict)]
+    if not rows:
+        return None
+    latest = rows[-1]
+    return latest if latest.get("outcome") == "FAILED" else None
+
+
+def refusal_text(prior):
+    """What a re-run over a FAILED run must print and then stop on."""
+    return (f"REFUSED: workdir holds a FAILED run ({prior.get('run_id')}; "
+            f"job {prior.get('job')!r}, rule {prior.get('rule')}, "
+            f"{prior.get('rounds', '?')} rounds). It stays on the record. "
+            "Re-run with --fresh to start a new run that cites this one.")
+
+
+def _section8_history(entries):
+    lines = ["## 8. Run history in this workdir", ""]
+    if not entries:
+        lines.append("This is the first recorded run here.")
+        return lines
+    lines.append(f"- Runs recorded: {len(entries)} (oldest first).")
+    for e in entries:
+        lines.append(f"- {e.get('run_id')}: {e.get('outcome')} -- "
+                     f"{e.get('job')} "
+                     f"({e.get('rounds', '?')} rounds, rule {e.get('rule')}, "
+                     f"{e.get('when', '?')})")
+    return lines
+
+
+def append_history(workdir, entry):
+    """Append one run to the workdir history; the list only ever grows."""
+    path = Path(workdir) / RUNS_REL
+    rows = load_history(workdir)
+    rows.append(entry)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(rows, indent=2) + "\n", encoding="utf-8")
+    return rows
+
+
+def history_entry(rec):
+    """One readable line of history from a finished run record."""
+    state = rec.get("goldfish_state") or {}
+    out = (state.get("outcome") or {}) if isinstance(state, dict) else {}
+    if isinstance(state, dict) and state.get("rounds"):
+        rounds = len(state["rounds"])
+    else:
+        rounds = 0
+    return {
+        "run_id": rec.get("run_id") or "never started",
+        "job": rec.get("job"),
+        "outcome": rec["stop"]["result"],
+        "rule": out.get("rule", "-"),
+        "rounds": rounds,
+        "when": time.strftime("%Y-%m-%d %H:%M", time.localtime(rec["t0"])),
+    }
+
+
 def write_report(workdir, rec):
     """Render the report, write it under the workdir, return its path."""
     workdir = Path(workdir)
     rec["elapsed_s"] = time.time() - rec["t0"]
+    # The report carries the history including this run, so a re-run can
+    # never overwrite the past — it cites it. Refusals never reach here.
+    entries = load_history(workdir) + [history_entry(rec)]
+    rec["history"] = entries
     path = workdir / REPORT_REL
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(render(workdir, rec), encoding="utf-8")
+    append_history(workdir, history_entry(rec))
     return path

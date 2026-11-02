@@ -51,6 +51,9 @@ gate that slows the builder gets fixed; it never gets silently skipped.
 Since card series DVC 1/4 the spec record is hashed at Define, and fix B
 made it a gate: `dvc_run.py` hashes the spec at Define, declared drift
 stays advisory, and undeclared drift fails the run at Verify (G7).
+Fix C keeps a run history: re-running over a FAILED run refuses to
+start unless `--fresh` is passed, and the report cites every run in
+the workdir.
 
 ## Stage map (pipeline stage → skill that owns it)
 

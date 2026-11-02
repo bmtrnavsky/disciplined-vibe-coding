@@ -21,6 +21,11 @@ check "g7 check" scripts/dvc_gates.py "def check_spec_stable"
 check "not built gate" scripts/dvc_gates.py "NOT BUILT"
 check "report not built" scripts/dvc_report.py "NOT BUILT"
 check "report gate G7" scripts/dvc_report.py '"G7"'
+check "run history file" scripts/dvc_report.py "runs.json"
+check "history section" scripts/dvc_report.py "Run history in this workdir"
+if grep -qF -- "--fresh" "$ROOT/scripts/dvc_run.py"; then pass=$((pass+1)); else fail=$((fail+1)); echo "FAIL: fresh flag (scripts/dvc_run.py)"; fi
+check "refusal names prior" scripts/dvc_report.py "REFUSED"
+check "crash writes failed" scripts/dvc_run.py "CRASH:"
 if grep -qF "pre_tool_call" "$ROOT/__init__.py"; then fail=$((fail+1)); echo "FAIL: blocking hook still registered (__init__.py)"; else pass=$((pass+1)); fi
 if grep -qF "on_pre_tool_call" "$ROOT/spec_lock.py"; then fail=$((fail+1)); echo "FAIL: blocking hook still present (spec_lock.py)"; else pass=$((pass+1)); fi
 check "lock tool present" spec_lock.py "def cmd_lock"
