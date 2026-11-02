@@ -9,9 +9,11 @@ Spec record is advisory only: the spec is hashed at Define via
 `spec_lock.cmd_lock`, and Verify re-hashes and prints a drift line when
 the spec moved mid-run. Drift is visibility, never a block.
 
-Later cards own the rest: goldfish review loop (card 2), stop rules and
-gates (card 3), run report (card 4). Teardown below is a two-line stub
-until card 2 replaces it.
+Later cards own the rest: gates (card 3), run report (card 4).
+Teardown below runs the blind goldfish loop (card 2): the reviewer sees
+only the spec + plan bytes, never the implementation; objections return
+as new work; two straight failures on one round or three total failures
+stop the run with a failure report.
 
 Usage:
     python scripts/dvc_run.py --job "one-line job description"
@@ -25,7 +27,9 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 import spec_lock  # noqa: E402  (stdlib-only sibling; hash/record logic reused)
+import dvc_goldfish  # noqa: E402  (blind review loop: rounds, judge, stop rules)
 
 STAGES = ("Define", "Plan", "Teardown", "Build", "Verify")
 DEFAULT_SPEC = ".pipeline/to-spec.md"
@@ -72,16 +76,56 @@ def cmd_plan(workdir, job):
     print(f"plan: {plan.relative_to(workdir).as_posix()}", flush=True)
 
 
-def cmd_teardown(workdir):
-    # shortcut: stub two-pass notes; card 2 builds the real goldfish loop.
+def plan_text_for(workdir):
+    plans = sorted((workdir / ".pipeline" / "plans").glob("*.md"))
+    parts = []
+    for p in plans:
+        try:
+            parts.append(p.read_text(encoding="utf-8"))
+        except OSError:
+            continue
+    parts.append(teardown_notes_text(workdir))
+    return "\n".join(parts)
+
+
+def teardown_notes_text(workdir):
+    try:
+        return (workdir / ".pipeline" / "teardown.md").read_text(encoding="utf-8")
+    except OSError:
+        return ""
+
+
+def cmd_teardown(workdir, run_id):
+    # Goldfish loop (card 2): the reviewer is blind -- it receives only
+    # the spec + plan bytes, never the implementation, never chat history.
     stage("Teardown")
     (workdir / ".pipeline" / "teardown.md").write_text(
-        "# Teardown (stub — card 2 owns the goldfish loop)\n\n"
-        "- consequence: building exactly this spec changes only the workdir.\n"
-        "- alternatives: none considered at skeleton rung.\n",
+        "# Teardown (goldfish notes)\n\n"
+        "- consequence: building exactly this spec changes only the workdir;\n"
+        "  breaks if the job needs anything outside the workdir.\n"
+        "- alternatives: doing nothing is the other option; building is\n"
+        "  strongest because the run stays reversible inside the workdir.\n",
         encoding="utf-8",
     )
-    print("teardown: stub passes recorded (advisory)", flush=True)
+
+    def read_artifact():
+        return (
+            (workdir / DEFAULT_SPEC).read_text(encoding="utf-8"),
+            plan_text_for(workdir),
+        )
+
+    def elephant_respond(round_name, objections):  # noqa: ARG001
+        # Rework = new teardown line answering the round. Never touches the
+        # spec: the loop must not loosen what it reviews to force a pass.
+        note = (f"\n- rework ({round_name}): the workdir-only consequence and\n"
+                f"  the doing-nothing alternative both stand; restated for review.\n")
+        with open(workdir / ".pipeline" / "teardown.md", "a", encoding="utf-8") as fh:
+            fh.write(note)
+        return ("restated the workdir-only consequence and the "
+                "doing-nothing alternative; spec untouched")
+
+    state = dvc_goldfish.run_loop(workdir, read_artifact, elephant_respond, run_id)
+    return state["outcome"]["result"] == "PASS"
 
 
 def cmd_build(workdir, build_cmd):
@@ -128,8 +172,13 @@ def main(argv=None):
     locked_hash = cmd_define(workdir, ns.job)
     if locked_hash is None:
         return 1
+    run_id = dvc_goldfish.make_run_id()
+    print(f"run: {run_id}", flush=True)
     cmd_plan(workdir, ns.job)
-    cmd_teardown(workdir)
+    if not cmd_teardown(workdir, run_id):
+        print("STOP: goldfish loop ended in FAILURE; Build never starts.",
+              flush=True)
+        return 1
     if not cmd_build(workdir, ns.build):
         print("STOP: build command failed; run ends here.", flush=True)
         return 1

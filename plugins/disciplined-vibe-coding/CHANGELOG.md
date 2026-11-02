@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+Added: goldfish loop in the autonomous run (card series DVC 2/4) —
+`scripts/dvc_goldfish.py` runs the two micro-spec teardown rounds with a
+blind reviewer (spec+plan bytes only; no approve verdict; silence = pass).
+Objections return as new work; a pass resets the round. Same-round stop:
+two straight failures, no third attempt. Total cap: 3 (rounds + 1) --
+a converging run fails each round at most once on first sight, so the
+3rd failure means cleared ground broke again. Failure counts live in
+`.pipeline/goldfish.json` keyed (run_id -> round); the spec hash is
+recorded per verdict, never a key, so mid-run amendments cannot reset the
+count. Stub `DVC_GOLDFISH_STUB` honored only under `DVC_TEST_MODE=1`.
+Covered by `selfcheck.sh`.
+
 Changed: spec record made advisory (card series DVC 1/4) — the 8ba8aaa
 `pre_tool_call` blocking hook is removed; `dvc_run.py` hashes the spec
 at Define and prints a drift line at Verify. Kept: sha256/record logic

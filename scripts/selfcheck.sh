@@ -27,6 +27,15 @@ check "goldfish hardening" plugins/disciplined-vibe-coding/SKILL.md "Each round 
 check "1.0 bar measurement" plugins/disciplined-vibe-coding/SKILL.md "named in the changelog entry that claims 1.0"
 check "secret scan pipeline" plugins/disciplined-vibe-coding/SKILL.md "Secret scan before every commit"
 check "secret scan version" skills/version/SKILL.md "secret-scan hit"
+check "goldfish module" scripts/dvc_goldfish.py "cannot approve"
+check "goldfish blind" scripts/dvc_goldfish.py "Sees only the two texts"
+check "same-round stop" scripts/dvc_goldfish.py "SAME_ROUND_LIMIT = 2"
+check "total cap" scripts/dvc_goldfish.py "TOTAL_FAILURE_CAP = len(ROUNDS) + 1"
+check "count keying" scripts/dvc_goldfish.py "never by spec hash"
+check "stub gated" scripts/dvc_goldfish.py "DVC_TEST_MODE"
+check "loop wired" scripts/dvc_run.py "goldfish loop ended in FAILURE"
+check "run id" scripts/dvc_run.py "run_id = dvc_goldfish.make_run_id"
+check "no third attempt" scripts/dvc_goldfish.py "no third attempt"
 if bash -n "$ROOT/hooks/readcheck.sh"; then pass=$((pass+1));
 else fail=$((fail+1)); echo "FAIL: hooks/readcheck.sh syntax"; fi
 if python -m py_compile "$ROOT/__init__.py" 2>/dev/null; then pass=$((pass+1));
