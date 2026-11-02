@@ -45,6 +45,10 @@ check "gate G5 wired" scripts/dvc_run.py "build/proof-green"
 check "gate G6 mapped" scripts/dvc_run.py "verify/done-claim-mapped"
 check "gate fail names" scripts/dvc_gates.py "GATE FAIL"
 check "advisory labelled" scripts/dvc_run.py "ADVISORY"
+check "report module" scripts/dvc_report.py "run-report.md"
+check "report printed" scripts/dvc_run.py 'report: {path}'
+check "report quotes verbatim" scripts/dvc_report.py "quoted verbatim"
+check "report never overstates" scripts/dvc_report.py "never \"completed with notes\""
 if bash -n "$ROOT/hooks/readcheck.sh"; then pass=$((pass+1));
 else fail=$((fail+1)); echo "FAIL: hooks/readcheck.sh syntax"; fi
 if python -m py_compile "$ROOT/__init__.py" 2>/dev/null; then pass=$((pass+1));

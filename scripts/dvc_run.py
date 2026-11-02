@@ -16,10 +16,11 @@ A failed gate stops the run and names the gate. What no machine check
 can evaluate stays labelled ADVISORY in the Verify output (A1-A6),
 with the plain reason why.
 
-Teardown runs the blind goldfish loop (card 2): the reviewer sees
-only the spec + plan bytes, never the implementation; objections return
-as new work; two straight failures on one round or three total failures
-stop the run with a failure report.
+Report (card 4): every exit — success or stop — writes
+`.pipeline/run-report.md` via `dvc_report.py` and prints
+`report: <path>` as the last line, so Brad can find what happened
+without having watched. A stopped run says FAILED in plain words,
+never "completed with notes".
 
 Usage:
     python scripts/dvc_run.py --job "one-line job description"
@@ -37,6 +38,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import spec_lock  # noqa: E402  (stdlib-only sibling; hash/record logic reused)
 import dvc_gates  # noqa: E402  (automatic checks for every pipeline gate)
 import dvc_goldfish  # noqa: E402  (blind review loop: rounds, judge, stop rules)
+import dvc_report  # noqa: E402  (end-of-run report Brad reads afterwards)
 
 STAGES = ("Define", "Plan", "Teardown", "Build", "Verify")
 DEFAULT_SPEC = ".pipeline/to-spec.md"
@@ -49,6 +51,13 @@ def _slug(job):
 
 def stage(name):
     print(f"[{name}]", flush=True)
+
+
+def finish(workdir, rec, code):
+    """Write the run report and print its path; the run's last line."""
+    path = dvc_report.write_report(workdir, rec)
+    print(f"report: {path}", flush=True)
+    return code
 
 
 def cmd_define(workdir, job):
@@ -133,11 +142,20 @@ def cmd_teardown(workdir, run_id):
                 "doing-nothing alternative; spec untouched")
 
     state = dvc_goldfish.run_loop(workdir, read_artifact, elephant_respond, run_id)
-    return state["outcome"]["result"] == "PASS"
+    return state
 
 
-def gate_or_stop(workdir, gate_id, name, ok, reason, next_stage):
-    """Evaluate one gate: pass records PASS, fail records FAIL and stops."""
+def gate_or_stop(workdir, rec, gate_id, name, ok, reason, next_stage,
+                 record=True):
+    """Evaluate one gate: pass records PASS, fail records FAIL and stops.
+
+    record=False prints the line without touching the report record --
+    for Verify's own mapping line, which main() already recorded.
+    """
+    if record:
+        rec["gates"].append({"id": gate_id, "name": name,
+                            "outcome": "PASS" if ok else "FAIL",
+                            "reason": reason})
     dvc_gates.wayfinder_append(workdir, gate_id, "PASS" if ok else "FAIL", reason)
     if ok:
         print(f"GATE PASS: {gate_id} {name} — {reason}.", flush=True)
@@ -164,20 +182,21 @@ def cmd_build(workdir, build_cmd):
     return proc.returncode
 
 
-def cmd_verify(workdir, locked_hash, gates_passed):
+def cmd_verify(workdir, rec, locked_hash, gates_passed):
     # G6 done-claim-mapped: Verify is reached only because every earlier
     # gate passed. The caller asserts this from the in-run record; Verify
     # re-states it so a reader can see the mapping without trusting flow.
     stage("Verify")
     if gates_passed:
-        gate_or_stop(workdir, "G6", "verify/done-claim-mapped", True,
+        gate_or_stop(workdir, rec, "G6", "verify/done-claim-mapped", True,
                      "Define, Plan, Teardown, Build all passed; this Verify maps to them",
-                     "run end")
+                     "run end", record=False)
     else:
         # Unreachable through main() — earlier stops return first — but a
         # caller that bypasses the chain must still be named, not trusted.
-        gate_or_stop(workdir, "G6", "verify/done-claim-mapped", False,
-                     "Verify reached with an earlier gate unpassed", "run end")
+        gate_or_stop(workdir, rec, "G6", "verify/done-claim-mapped", False,
+                     "Verify reached with an earlier gate unpassed", "run end",
+                     record=False)
         return
     for line in advisory_lines():
         print(line, flush=True)
@@ -205,41 +224,86 @@ def main(argv=None):
 
     workdir = Path(ns.workdir)
     t0 = time.time()
+    rec = dvc_report.new_record(ns.job)
+    rec["advisories"] = dvc_gates.ADVISORIES
+    rec["build_cmd"] = ns.build
     print(f"dvc_run: job={ns.job!r} workdir={workdir}", flush=True)
 
     locked_hash = cmd_define(workdir, ns.job)
     if locked_hash is None:
-        return 1
+        rec["stop"] = {"result": "FAILED",
+                       "sentence": "The run failed at Define: the spec "
+                                   "could not be hashed, so nothing else ran."}
+        return finish(workdir, rec, 1)
+    rec["locked_hash"] = locked_hash
     run_id = dvc_goldfish.make_run_id()
+    rec["run_id"] = run_id
     print(f"run: {run_id}", flush=True)
     ok, why = dvc_gates.check_spec_locked(workdir)
-    if not gate_or_stop(workdir, "G1", "define/spec-locked", ok, why, "Plan"):
-        return 1
+    if not gate_or_stop(workdir, rec, "G1", "define/spec-locked",
+                        ok, why, "Plan"):
+        rec["stop"] = {"result": "FAILED",
+                       "sentence": "The run failed at gate G1 "
+                                   f"(define/spec-locked): {why}. "
+                                   "It stopped before Plan."}
+        return finish(workdir, rec, 1)
     ok, why = dvc_gates.check_rung_declared(workdir)
-    if not gate_or_stop(workdir, "G2", "economy/rung-declared", ok, why, "Plan"):
-        return 1
+    if not gate_or_stop(workdir, rec, "G2", "economy/rung-declared",
+                        ok, why, "Plan"):
+        rec["stop"] = {"result": "FAILED",
+                       "sentence": "The run failed at gate G2 "
+                                   f"(economy/rung-declared): {why}. "
+                                   "It stopped before Plan."}
+        return finish(workdir, rec, 1)
     cmd_plan(workdir, ns.job)
     ok, why = dvc_gates.check_plan_shaped(workdir)
-    if not gate_or_stop(workdir, "G3", "plan/shaped", ok, why, "Teardown"):
-        return 1
-    if not cmd_teardown(workdir, run_id):
-        gate_or_stop(workdir, "G4", "teardown/goldfish-pass", False,
+    if not gate_or_stop(workdir, rec, "G3", "plan/shaped",
+                        ok, why, "Teardown"):
+        rec["stop"] = {"result": "FAILED",
+                       "sentence": "The run failed at gate G3 "
+                                   f"(plan/shaped): {why}. "
+                                   "It stopped before Teardown."}
+        return finish(workdir, rec, 1)
+    state = cmd_teardown(workdir, run_id)
+    rec["goldfish_state"] = state
+    if state["outcome"]["result"] != "PASS":
+        gate_or_stop(workdir, rec, "G4", "teardown/goldfish-pass", False,
                      "goldfish loop ended in FAILURE (see objections above)",
                      "Build")
+        rule = state["outcome"].get("rule", "?")
+        rnd = state["outcome"].get("round", "?")
+        rec["stop"] = {"result": "FAILED",
+                       "sentence": "The run failed at Teardown: the goldfish "
+                                   f"stopped it by the {rule} rule on round "
+                                   f"'{rnd}'. Build never started."}
         print("STOP: goldfish loop ended in FAILURE; Build never starts.",
               flush=True)
-        return 1
-    gate_or_stop(workdir, "G4", "teardown/goldfish-pass", True,
+        return finish(workdir, rec, 1)
+    gate_or_stop(workdir, rec, "G4", "teardown/goldfish-pass", True,
                  "goldfish loop PASS, no standing objection", "Build")
     rc = cmd_build(workdir, ns.build)
+    rec["build_rc"] = rc
     ok, why = dvc_gates.check_build(rc, bool(ns.build))
-    if not gate_or_stop(workdir, "G5", "build/proof-green", ok, why, "Verify"):
+    if not gate_or_stop(workdir, rec, "G5", "build/proof-green",
+                        ok, why, "Verify"):
+        rec["stop"] = {"result": "FAILED",
+                       "sentence": "The run failed at Build: the build "
+                                   f"command exited {rc}. "
+                                   "It stopped before Verify."}
         print("STOP: build command failed; run ends here.", flush=True)
-        return 1
-    cmd_verify(workdir, locked_hash, True)
+        return finish(workdir, rec, 1)
+    rec["gates"].append({"id": "G6", "name": "verify/done-claim-mapped",
+                        "outcome": "PASS",
+                        "reason": "Define, Plan, Teardown, Build all passed; "
+                                  "this Verify maps to them"})
+    cmd_verify(workdir, rec, locked_hash, True)
+    rec["stop"] = {"result": "SUCCEEDED",
+                   "sentence": "The run succeeded: all six gates passed "
+                               "and the goldfish raised no standing "
+                               "objection."}
     print(f"[Verify] done in {time.time() - t0:.1f}s — "
           f"Define through Verify, zero human input.", flush=True)
-    return 0
+    return finish(workdir, rec, 0)
 
 
 if __name__ == "__main__":
