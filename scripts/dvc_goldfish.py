@@ -158,17 +158,25 @@ def _config():
 
 # ---------- packet ----------
 
-def _packet_files(workdir: Path):
+def _packet_files(workdir: Path, define_spec: bytes | None = None):
     """Fixed file set. Never teardown scratch, never elephant responses,
-    never run plumbing. Sees only the packet files."""
+    never run plumbing. Sees only the packet files.
+
+    The spec entry is the spec as locked at Define when define_spec is
+    given (fix E) — never the current file, so a build that hollowed
+    the spec cannot shrink what the reviewer judges.
+    """
     workdir = Path(workdir)
     files: list[tuple[str, bytes]] = []
-    spec = workdir / ".pipeline" / "to-spec.md"
-    try:
-        files.append((".pipeline/to-spec.md", spec.read_bytes()))
-    except OSError as exc:
-        raise DvcReviewError("packet cannot be assembled: spec unreadable "
-                             f"({exc}); failing closed") from None
+    if define_spec is not None:
+        files.append((".pipeline/to-spec.md", define_spec))
+    else:
+        spec = workdir / ".pipeline" / "to-spec.md"
+        try:
+            files.append((".pipeline/to-spec.md", spec.read_bytes()))
+        except OSError as exc:
+            raise DvcReviewError("packet cannot be assembled: spec unreadable "
+                                 f"({exc}); failing closed") from None
     lock = workdir / ".pipeline" / "spec.lock"
     if lock.is_file():
         files.append((".pipeline/spec.lock", lock.read_bytes()))
@@ -245,15 +253,17 @@ def _collect_outputs(workdir: Path):
     return included, inventory
 
 
-def do_packet(workdir) -> dict:
+def do_packet(workdir, define_spec: bytes | None = None) -> dict:
     """Assemble the fixed file set under .pipeline/packets/<hash>/.
 
     The directory name is the packet's own content hash, so the builder
-    cannot swap what the reviewer sees without changing the path.
+    cannot swap what the reviewer sees without changing the path. Pass
+    define_spec (the spec bytes as locked at Define) and the packet
+    carries that — never the current file (fix E).
     """
     workdir = Path(workdir)
     cfg = _config()
-    files = _packet_files(workdir)
+    files = _packet_files(workdir, define_spec)
     digest = hashlib.sha256(f"{FORMAT_PACKET}\n".encode())
     manifest_files = []
     total = 0
@@ -423,12 +433,13 @@ def parse_verdicts(text: str, rounds: list[str]) -> dict[str, tuple[str, str]]:
     return out
 
 
-def do_review_run(workdir, rounds: list[str]) -> dict:
+def do_review_run(workdir, rounds: list[str],
+                   define_spec: bytes | None = None) -> dict:
     """One packet + one model call covering all rounds. Returns the recorded
     call (verdicts, packet path, envelope, raw response)."""
     workdir = Path(workdir)
     cfg = _config()
-    pkt = do_packet(workdir)
+    pkt = do_packet(workdir, define_spec)
     packet_dir = Path(pkt["dir"])
     manifest = json.loads((packet_dir / "manifest.json").read_text(
         encoding="utf-8"))
@@ -544,20 +555,23 @@ def _spec_sha(workdir):
     return _sha(data)
 
 
-def run_loop(workdir, elephant_respond, run_id):
+def run_loop(workdir, elephant_respond, run_id, define_spec=None):
     """Run rounds until no objection (PASS) or a stop rule fires (FAIL).
 
     Each iteration assembles a fresh packet from the workdir and makes one
     model call covering every round. ``elephant_respond``(round,
     objections) reworks the artifact on disk (never the spec) and returns
     a response text. Returns the state dict (outcome.result is PASS/FAIL).
+    define_spec (bytes) freezes the spec entry at the Define version —
+    the reviewer judges that, never the current file (fix E).
     """
     workdir = Path(workdir)
     state = new_state(run_id)
     seq = 0
     while True:
         try:
-            call = do_review_run(workdir, list(ROUNDS))
+            call = do_review_run(workdir, list(ROUNDS),
+                                 define_spec=define_spec)
         except DvcReviewError as exc:
             seq += 1
             rnd = ROUNDS[0]

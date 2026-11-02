@@ -23,7 +23,9 @@ The build can never hang on a prompt (fix B): stdin is closed
 Spec record (fix B amends the old advisory-only rule): the spec is
 hashed at Define via `spec_lock.cmd_lock`, declared changes are
 re-hashed with who/why, and Verify fails undeclared drift at gate G7.
-Declared drift stays visibility, never a block.
+Declared drift stays visibility, never a block — unless the declaration
+was added during the Build window (fix E): the builder cannot declare
+its own drift, so G7 fails that.
 
 Gates (card 3): every gate the pipeline claims is evaluated by the run
 itself via `dvc_gates.py` — G1 spec-locked, G2 rung-declared, G3
@@ -117,19 +119,53 @@ def cmd_plan(workdir, job):
     print(f"plan: {plan.relative_to(workdir).as_posix()}", flush=True)
 
 
-def cmd_teardown_review(workdir, run_id):
+def _lock_decl_keys(workdir):
+    """Declaration identities recorded before the Build window.
+
+    G7 treats any declaration NOT in this pre-Build set as added during
+    Build — the builder declaring its own drift (fix E). Tuple of
+    (old, new) hash pairs, never raising: an unreadable lock just means
+    an empty pre-Build set.
+    """
+    try:
+        lock = spec_lock.read_lock(spec_lock.lock_path_for(workdir))
+    except Exception:
+        return ()
+    decls = lock.get("declarations") or []
+    keys = []
+    for d in decls:
+        if isinstance(d, dict):
+            keys.append((d.get("old"), d.get("new")))
+        else:
+            keys.append((None, None))
+    return tuple(keys)
+
+
+def _define_spec_bytes(workdir):
+    """Spec bytes as locked at Define; None when unreadable."""
+    try:
+        return (Path(workdir) / DEFAULT_SPEC).read_bytes()
+    except OSError:
+        return None
+
+
+def cmd_teardown_review(workdir, run_id, define_spec):
     # Goldfish (fix A): the reviewer assembles a hash-locked packet of
     # spec + plan + BUILD OUTPUT and reviews it with one model call per
     # iteration (SDDA-shaped). It runs AFTER Build, because a reviewer
     # that never sees what was built cannot review the build. Rework =
     # new build output on disk; the loop never touches the spec.
+    # The packet uses the spec as locked at Define (fix E), never the
+    # current file: a build that hollowed the spec gets judged against
+    # the real one.
     stage("Teardown")
 
     def elephant_respond(round_name, objections):  # noqa: ARG001
         return ("rework recorded as new build output on disk; "
                 "spec untouched")
 
-    state = dvc_goldfish.run_loop(workdir, elephant_respond, run_id)
+    state = dvc_goldfish.run_loop(workdir, elephant_respond, run_id,
+                                  define_spec=define_spec)
     return state
 
 
@@ -244,13 +280,16 @@ def cmd_build(workdir, build_cmd):
     return rc
 
 
-def cmd_verify(workdir, rec, locked_hash, gates_passed):
+def cmd_verify(workdir, rec, locked_hash, gates_passed, build_decls=()):
     # G6 done-claim-mapped: Verify is reached only because every earlier
     # gate passed. The caller asserts this from the in-run record; Verify
     # re-states it so a reader can see the mapping without trusting flow.
     # G7 spec-stable (fix B): undeclared drift FAILS the run here. A
     # build that rewrote the spec to "do nothing" is caught by this
     # gate — Verify returns False and the caller reports FAILED.
+    # Fix E: a declaration added during the Build window fails too —
+    # build_decls holds the pre-Build declaration keys, so G7 can tell
+    # a legitimate mid-run amendment from the builder declaring itself.
     stage("Verify")
     gate_or_stop(workdir, rec, "G6", "verify/done-claim-mapped",
                  gates_passed,
@@ -264,7 +303,7 @@ def cmd_verify(workdir, rec, locked_hash, gates_passed):
         return False
     for line in advisory_lines():
         print(line, flush=True)
-    ok, why = dvc_gates.check_spec_stable(workdir, locked_hash)
+    ok, why = dvc_gates.check_spec_stable(workdir, locked_hash, build_decls)
     gate_or_stop(workdir, rec, "G7", "verify/spec-stable", ok, why,
                  "run end")
     if ok:
@@ -348,8 +387,20 @@ def _run(ns, workdir, rec, t0):
                                    f"(plan/shaped): {why}. "
                                    "It stopped before Teardown."}
         return finish(workdir, rec, 1)
+    # Fix E: snapshot before Build. The declaration keys recorded here
+    # are the only ones G7 counts as legitimate; anything added while
+    # the builder holds the workdir is the builder declaring itself.
+    # The Define spec bytes travel to the reviewer for the same reason:
+    # the packet judges the locked spec, never the hollowed file.
+    pre_decls = _lock_decl_keys(workdir)
+    define_spec = _define_spec_bytes(workdir)
     rc = cmd_build(workdir, ns.build)
     rec["build_rc"] = rc
+    # The Build window delta: declarations the builder added while it
+    # held the workdir. G7 fails on any of these; a declaration from
+    # outside this window stays a pass.
+    build_window = tuple(k for k in _lock_decl_keys(workdir)
+                         if k not in set(pre_decls))
     if rc == "not-built":
         # NOT BUILT (fix B): no builder in this path, so nothing may
         # pass. Exit 2 (not 1) so it never reads as a build failure
@@ -386,7 +437,7 @@ def _run(ns, workdir, rec, t0):
                                    "It stopped before the goldfish review."}
         print("STOP: build command failed; run ends here.", flush=True)
         return finish(workdir, rec, 1)
-    state = cmd_teardown_review(workdir, run_id)
+    state = cmd_teardown_review(workdir, run_id, define_spec)
     rec["goldfish_state"] = state
     if state["outcome"]["result"] != "PASS":
         gate_or_stop(workdir, rec, "G4", "teardown/goldfish-pass", False,
@@ -407,12 +458,14 @@ def _run(ns, workdir, rec, t0):
                         "outcome": "PASS",
                         "reason": "Define, Plan, Build, Teardown all passed; "
                                   "this Verify maps to them"})
-    if not cmd_verify(workdir, rec, locked_hash, True):
+    if not cmd_verify(workdir, rec, locked_hash, True, build_window):
         # G7 spec-stable (fix B): undeclared drift — e.g. a build that
         # rewrote the spec to "do nothing" — fails the run at Verify.
+        # Fix E: a Build-window self-declaration fails here too.
         rec["stop"] = {"result": "FAILED",
                        "sentence": "The run failed at Verify: the spec "
-                                   "moved mid-run with no declaration. "
+                                   "moved mid-run with no legitimate "
+                                   "declaration. "
                                    "It stopped at the end, not as a pass."}
         print("STOP: undeclared spec drift; run ends here as FAILED.",
               flush=True)

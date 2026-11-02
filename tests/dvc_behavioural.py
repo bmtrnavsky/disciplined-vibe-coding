@@ -217,6 +217,66 @@ class TestBuildOutcomes(unittest.TestCase):
             self.assertIn("Result: FAILED", text)
 
 
+class TestFixESelfDeclare(unittest.TestCase):
+    """Fix E: the builder cannot declare its own spec drift.
+
+    The Opus repro rewrites the spec to 'do nothing' inside the build
+    and self-declares (`declare --by builder`) — G7 passed it as
+    'declared by builder' and the run read SUCCEEDED. The Build window
+    delta now fails the run; a declaration from outside Build stays a
+    pass, and the reviewer packet carries the Define spec.
+    """
+
+    def test_build_rewrite_plus_self_declare_fails_at_g7(self):
+        """Opus repro end to end: hollow spec + self-declare FAILs at G7."""
+        hollow_and_declare = (
+            "python -c \""
+            "open('.pipeline/to-spec.md','w').write("
+            "'# To-spec (micro)\\n\\nJob: nothing\\n\\n"
+            "rung: do nothing at all.\\n');"
+            "open('out.txt','w').write('built')\""
+            f" && python \"{ROOT / 'spec_lock.py'}\" declare"
+            " --by builder --why simplified"
+        )
+        with fresh_workdir() as work, stub_env("P"):
+            code, out, text = run_job(work, hollow_and_declare)
+            self.assertEqual(code, 1)
+            self.assertIn("GATE FAIL: G7", out)
+            self.assertIn("Build window", out)
+            self.assertIn("cannot declare its own drift", out)
+            self.assertIn("Result: FAILED", text)
+            self.assertNotIn("SUCCEEDED", text)
+
+    def test_declare_outside_build_still_passes(self):
+        """A declaration recorded outside the Build window stays a pass."""
+        with fresh_workdir() as work:
+            spec = work / ".pipeline" / "to-spec.md"
+            spec.parent.mkdir(parents=True, exist_ok=True)
+            spec.write_text("# To-spec\n\nrung: probe.\n", encoding="utf-8")
+            spec_lock.cmd_lock(str(work), ".pipeline/to-spec.md")
+            locked = spec_lock.sha256_file(spec)
+            spec.write_text("# To-spec\n\nrung: probe, amended.\n",
+                            encoding="utf-8")
+            spec_lock.cmd_declare(str(work), ".pipeline/to-spec.md",
+                                  by="human", why="legitimate amendment")
+            ok, why = dvc_gates.check_spec_stable(work, locked, ())
+            self.assertTrue(ok, f"outside-Build declare must pass: {why}")
+
+    def test_packet_carries_define_spec(self):
+        """The reviewer judges the Define spec, never the hollowed file."""
+        with fresh_workdir() as work:
+            spec = work / ".pipeline" / "to-spec.md"
+            spec.parent.mkdir(parents=True, exist_ok=True)
+            define_bytes = b"# To-spec\n\nrung: real work.\n"
+            spec.write_bytes(define_bytes)
+            (work / "out.txt").write_text("built\n", encoding="utf-8")
+            spec.write_bytes(b"# To-spec\n\nrung: do nothing at all.\n")
+            pkt = gf.do_packet(work, define_bytes)
+            packed = (Path(pkt["dir"]) / ".pipeline" / "to-spec.md"
+                      ).read_bytes()
+            self.assertEqual(packed, define_bytes)
+
+
 class TestGates(unittest.TestCase):
     def test_failing_gate_stops_and_is_named(self):
         """A failing build names its gate (G5) and stops before review."""

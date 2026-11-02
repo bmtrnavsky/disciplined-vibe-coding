@@ -27,7 +27,9 @@ Gate table (id, what it means, status, check):
       AUTO: current spec hash equals the Define lock, or the lock was
       re-hashed with a declaration naming who and why. Undeclared drift
       fails the run at Verify. (Fix B: a build that rewrites the spec to
-      "do nothing" no longer reads as SUCCEEDED.)
+      "do nothing" no longer reads as SUCCEEDED. Fix E: a declaration
+      added during the Build window fails too — the builder cannot
+      declare its own drift.)
 
 Advisory (evaluated by no machine check; labelled ADVISORY in run output):
 
@@ -134,12 +136,19 @@ def check_build(returncode, had_command):
     return False, f"build command exit {returncode}"
 
 
-def check_spec_stable(workdir, locked_hash):
+def check_spec_stable(workdir, locked_hash, build_window=()):
     """G7: spec still matches Define, or a change was declared.
 
     Declared = the lock was re-hashed via `declare --by NAME --why REASON`
     (the lock carries who/when/why). Anything else that moves the spec
     mid-run — including a build that rewrites it — fails here.
+
+    A declaration added during the Build window fails too (fix E): in
+    an autonomous run nobody can legitimately declare during Build, so
+    a builder that rewrites the spec and self-declares is caught here,
+    never waved through as SUCCEEDED. build_window holds the keys of
+    the declarations added while the builder held the workdir; only
+    those fail — a declaration from outside Build stays a pass.
     """
     workdir = Path(workdir)
     try:
@@ -160,6 +169,19 @@ def check_spec_stable(workdir, locked_hash):
                        f"current {_short(current)}) with no declaration")
     decls = lock.get("declarations") or []
     if lock.get("sha256") == current and decls:
+        # Build-window declarations are the builder declaring its own
+        # drift (fix E): any lock entry whose recorded hash pair was
+        # added while the builder held the workdir fails the run. A
+        # declaration from outside that window stays a pass.
+        bad = [d for d in decls
+               if _decl_key(d) in set(build_window)]
+        if bad:
+            last_bad = bad[-1]
+            by = last_bad.get("by") if last_bad.get("by") else "?"
+            why = last_bad.get("why") if last_bad.get("why") else "?"
+            return False, (f"spec changed mid-run and was declared during "
+                           f"the Build window by {by}: {why} — the builder "
+                           f"cannot declare its own drift")
         last = decls[-1]
         return True, (f"spec changed mid-run but declared by "
                       f"{last.get('by')}: {last.get('why')}")
@@ -168,6 +190,13 @@ def check_spec_stable(workdir, locked_hash):
                    f"{_short(current)}) with no declaration; "
                    f"declare it via `spec_lock.py declare --by NAME "
                    f"--why REASON`")
+
+
+def _decl_key(d):
+    """One declaration's identity: its recorded content hash pair."""
+    if not isinstance(d, dict):
+        return (None, None)
+    return (d.get("old"), d.get("new"))
 
 
 def wayfinder_append(workdir, stage, result, reason):
