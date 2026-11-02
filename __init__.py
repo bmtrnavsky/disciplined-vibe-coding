@@ -23,3 +23,15 @@ def register(ctx):
     )
     if pipeline_md.is_file():
         ctx.register_skill("disciplined-vibe-coding", pipeline_md)
+    # Blocking enforcement: refuse build-tool calls on undeclared spec
+    # drift (pre_tool_call can block; pre_llm_call cannot by design).
+    try:
+        from . import spec_lock as _spec_lock
+    except ImportError:  # loader without package context; silent
+        try:
+            import spec_lock as _spec_lock  # noqa: F401
+        except ImportError:
+            return
+    hook = getattr(ctx, "register_hook", None)
+    if callable(hook):
+        hook("pre_tool_call", _spec_lock.on_pre_tool_call)

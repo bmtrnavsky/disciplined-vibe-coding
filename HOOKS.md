@@ -36,8 +36,8 @@ Shell hooks communicate over a strict JSON contract, not plain text:
   in the sense that a broken hook can't crash the agent — malformed JSON, a
   nonzero exit, or a timeout all just log a warning and continue. That is
   separate from whether an individual hook's own logic can block a tool call
-  (`pre_tool_call` genuinely can, via `{"action": "block", ...}`) — this pack
-  doesn't use that, by choice, described below.
+  (`pre_tool_call` genuinely can, via `{"action": "block", ...}`) — §2 uses
+  exactly that, while §1 stays advisory by choice.
 
 ## 1. readcheck (pre_llm_call; nudges, never blocks)
 
@@ -60,6 +60,27 @@ emits `{}` and costs nothing.
 
 This hook cannot stop a tool call, cannot require approval, and cannot see
 which specific tool is about to run — those are `pre_tool_call` capabilities
-this pack deliberately doesn't use, since the goal here is a nudge visible to
+this hook deliberately doesn't use, since the goal here is a nudge visible to
 the model and the operator, not a gate that can misfire and block real work
 on a false positive.
+
+## 2. spec-lock (pre_tool_call; blocks undeclared spec drift)
+
+Registered automatically by the plugin's `register()` — no shell-hook wiring,
+no approval prompt. Guards `write_file`, `patch`, and `terminal` (the
+mutation surface; reads are never gated).
+
+```sh
+python spec_lock.py lock                              # Define: hash the spec
+python spec_lock.py check                             # re-hash and compare
+python spec_lock.py declare --by NAME --why REASON    # record a change
+```
+
+- Lock lives at `.pipeline/spec.lock`: spec path, sha256, declarations.
+- Undeclared drift → `{"action": "block", "message": "... lock <hash> !=
+  current <hash> ..."}` naming both hashes plus the declare command.
+- Missing/unreadable lock or spec → blocks (fail closed).
+- Declared drift re-hashes, appending who/when/why plus old/new hashes —
+  the bypass is visible in the lock, never silent.
+- Workdirs without `.pipeline/` are never gated, so non-DVC sessions keep
+  working with the plugin installed.

@@ -11,6 +11,12 @@ check() { # $1 = description, $2 = file, $3 = fixed string
   else fail=$((fail+1)); echo "FAIL: $1 ($2)"; fi
 }
 check "gate enforcement" plugins/disciplined-vibe-coding/SKILL.md "A failed gate blocks the next stage"
+check "spec-lock gate" plugins/disciplined-vibe-coding/SKILL.md "Spec-lock gate"
+check "spec-lock hook doc" HOOKS.md "spec-lock (pre_tool_call"
+check "hook registered" __init__.py "pre_tool_call"
+check "lock tool present" spec_lock.py "def on_pre_tool_call"
+check "hook fail-closed" spec_lock.py "fail closed"
+check "declare path" spec_lock.py "declarations"
 check "bypass logging" plugins/disciplined-vibe-coding/SKILL.md "logged in the Wayfinder result"
 check "teardown second failure" plugins/disciplined-vibe-coding/SKILL.md "A second failure on the same round stops the"
 check "rung step-up" plugins/disciplined-vibe-coding/SKILL.md "A rung never steps down"

@@ -45,9 +45,11 @@ Small work gets less ceremony, never more.
 A failed gate blocks the next stage. The builder cannot advance past
 a red gate on its own authority. The only way past a red gate without
 fixing it is an explicit user bypass, logged in the Wayfinder result
-line: who approved, what was red, and why it was waived. An unlogged
+who approved, what was red, and why it was waived. An unlogged
 bypass is a pipeline defect, counted the same as a skipped stage. A
 gate that slows the builder gets fixed; it never gets silently skipped.
+Since v0.3.0 one gate is actually enforced: the spec-lock `pre_tool_call`
+hook (§6.5) refuses build-tool calls on undeclared spec drift.
 
 ## Stage map (pipeline stage → skill that owns it)
 
@@ -197,6 +199,18 @@ with zero re-brief.
 - Teardown round notes: plan file (full-spec+) or to-spec (micro-spec).
 - Gate results: one result line per stage exit in `.pipeline/wayfinder.md`.
 - Research trail: `.pipeline/read.log` entries (`research`).
+- Spec lock: `.pipeline/spec.lock` — sha256 at Define, declarations on
+  change (`spec_lock.py lock` / `declare --by NAME --why REASON`).
+
+### 5c. Spec-lock gate (enforced, not advisory)
+
+At Define, `python spec_lock.py lock` hashes the to-spec into
+`.pipeline/spec.lock`. The plugin's `pre_tool_call` hook (§2 of `HOOKS.md`)
+refuses `write_file`/`patch`/`terminal` calls while the spec hash has moved
+without a recorded declaration, and fails closed when the lock or spec is
+missing or unreadable. A legitimate change is declared, never silent:
+`python spec_lock.py declare --by NAME --why REASON` re-hashes and appends
+who/when/why to the lock. Verify re-runs `check` and quotes the result.
 
 ## v0.2.0 resolutions
 

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+Added: spec-lock enforcement (v0.3.0 slice 1) — `spec_lock.py` hashes the
+to-spec at Define; the plugin `register()` wires a `pre_tool_call` hook that
+blocks `write_file`/`patch`/`terminal` on undeclared drift and fails closed
+on missing/unreadable lock or spec; `declare --by/--why` records legitimate
+changes visibly. Documented in `HOOKS.md` §2 and the pipeline `SKILL.md`
+(§5c); covered by `selfcheck.sh`.
+
 Fixed: gates enforced (a red gate blocks the next stage; user bypasses
 logged in Wayfinder with who/what/why); teardown second failure stops
 the pipeline (tried/learned/unexplained/options, wait for his call);

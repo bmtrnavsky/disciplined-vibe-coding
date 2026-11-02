@@ -19,7 +19,7 @@ docs_url: https://github.com/bmtrnavsky/disciplined-vibe-coding#readme
 readme: true
 capabilities:
   provides_tools: []
-  provides_hooks: []
+  provides_hooks: [pre_tool_call]
   provides_middleware: []
   requires_env: []
 ```
@@ -41,7 +41,8 @@ capabilities:
   overlay under `plugins/disciplined-vibe-coding/`. No binaries, no
   dependencies, no network calls, no background processes, no telemetry.
 - One root `__init__.py` (stdlib only, no imports beyond the host API)
-  registers the skills with the host; no other code ships.
+  registers the skills with the host plus one `pre_tool_call` hook
+  (spec-lock enforcement, `spec_lock.py`); no other code ships.
 - Ships one optional shell hook (`hooks/`, documented in `HOOKS.md`): a
   research-freshness nudge. Runs only if the user installs it; reads
   nothing outside its own state file.
