@@ -53,7 +53,13 @@ made it a gate: `dvc_run.py` hashes the spec at Define, declared drift
 stays advisory, and undeclared drift fails the run at Verify (G7).
 Fix C keeps a run history: re-running over a FAILED run refuses to
 start unless `--fresh` is passed, and the report cites every run in
-the workdir.
+the workdir. Fix E closes the self-declare hole: a build that rewrites
+the spec and declares it fails at G7 (only the Build-window delta
+fails; declares outside Build still pass), and the reviewer packet
+carries the Define spec. Fix F distrusts the workdir: packet assembly
+rejects links escaping it, and history lives outside the workdir,
+hash-chained. Fix G hardens the runner: builds get a minimal env, the
+reviewer stub needs `--test-mode` and is marked STUB everywhere.
 
 ## Stage map (pipeline stage → skill that owns it)
 

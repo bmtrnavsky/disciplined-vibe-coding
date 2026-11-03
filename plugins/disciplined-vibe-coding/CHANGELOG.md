@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+Fixes A–G (runner hardening series, all covered by
+`tests/dvc_behavioural.py`, 26/26):
+
+- Fix A (b6668c8): SDDA-shaped real reviewer — hash-locked packet plus
+  one-shot model call; the regex word-match judge is deleted.
+- Fix B (75c31a0): no build is NOT BUILT (exit 2); builds run with stdin
+  closed and a timeout tree-kill; undeclared spec drift fails at G7.
+- Fix C (adf1718): run history — `.pipeline/runs.json` records every
+  run; re-running over a FAILED latest run refuses (exit 3) unless
+  `--fresh`; reports cite all runs; crashes write FAILED.
+- Fix D (64841c0): real behavioural tests replacing the grep selfcheck
+  (see the existing suite entry below); disabling the same-round rule
+  and neutering the goldfish both make the suite FAIL.
+- Fix E (2a6694c): a build cannot declare its own spec drift —
+  Build-window self-declaration fails at G7 (lock-key delta
+  before/after Build; only that delta fails, outside-Build declares
+  still pass); the reviewer packet carries the Define spec.
+- Fix F (e1146dd): workdir contents are not trusted — packet assembly
+  rejects links escaping the workdir (symlink/hardlink/resolved path,
+  O_NOFOLLOW open); run history lives outside the workdir, hash-chained,
+  with a workdir mirror.
+- Fix G (74b6ca9): runner hygiene — builds run with a minimal allowlist
+  env (reviewer key unreachable); the reviewer stub needs the explicit
+  `--test-mode` flag and every stubbed verdict is marked STUB on screen,
+  in goldfish.json, the call record and the report; job/build text is
+  collapsed to one line so a forged `Result: SUCCEEDED` cannot lead the
+  report.
+
 Added: behavioural test suite (DVC fix D) — `tests/dvc_behavioural.py`
 runs the real runner (`python tests/dvc_behavioural.py`, stdlib unittest,
 no new dependency) and asserts on real output: same-round stop at 2 with no
