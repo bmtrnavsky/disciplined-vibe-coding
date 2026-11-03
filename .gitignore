@@ -1,3 +1,7 @@
 __pycache__/
 # Turing run workdirs and acceptance proof artifacts (evidence lives in card comments)
 .turing/
+
+# Proof and repro workdirs (never commit)
+.pipeline/
+TURING_*

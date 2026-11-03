@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 - 2026-11-02
 
 Fixes A–G (runner hardening series, all covered by
 `tests/dvc_behavioural.py`, 26/26):
