@@ -94,6 +94,16 @@ def _read_rows(path):
 GATE_ORDER = ("G1", "G2", "G3", "G4", "G5", "G6", "G7")
 
 
+def _one_line(text):
+    """Collapse free text to one line (fix G MED-4).
+
+    --job and --build are free text (often model-derived). Interpolated
+    raw, a newline + 'Result: SUCCEEDED' forges a leading verdict above
+    the true one in the one artifact Brad reads. One line, always.
+    """
+    return " ".join(str(text).split())
+
+
 def new_record(job):
     """Blank run record; dvc_run fills it in as stages complete."""
     return {
@@ -132,7 +142,7 @@ def _rung_line(spec_text):
 
 def _section1(workdir, rec):
     lines = ["## 1. What was built", ""]
-    lines.append(f"- Job: {rec['job']}")
+    lines.append(f"- Job: {_one_line(rec['job'])}")
     spec = workdir / SPEC_REL
     try:
         spec_text = spec.read_text(encoding="utf-8")
@@ -157,13 +167,13 @@ def _section1(workdir, rec):
         lines.append("- Build: NOT BUILT -- no --build command given; "
                      "nothing executed, the goldfish never ran")
     elif rec["build_rc"] == "timeout":
-        lines.append(f"- Build: `{rec['build_cmd']}` TIMED OUT and was "
+        lines.append(f"- Build: `{_one_line(rec['build_cmd'])}` TIMED OUT and was "
                      f"killed (DVC_BUILD_TIMEOUT)")
     elif not rec["build_cmd"]:
         lines.append("- Build: no --build command (skeleton); "
                      "nothing executed")
     else:
-        lines.append(f"- Build: `{rec['build_cmd']}` "
+        lines.append(f"- Build: `{_one_line(rec['build_cmd'])}` "
                      f"exited {rec['build_rc']}")
     made = [p for p in (SPEC_REL, LOCK_REL, GOLDFISH_REL,
                         WAYFINDER_REL)
@@ -189,6 +199,10 @@ def _section2(state):
     if state is None:
         lines.append("Teardown never ran, so the goldfish reviewed nothing.")
         return lines
+    if state.get("stub"):
+        lines.append("STUB — this review used canned verdicts; "
+                     "no model was consulted.")
+        lines.append("")
     fails = _fail_verdicts(state)
     if not fails:
         lines.append("Nothing. The goldfish reviewed "
@@ -252,7 +266,9 @@ def _section4(state):
     if out.get("result") == "PASS":
         lines.append(f"- Ending: success -- all rounds passed after "
                      f"{out.get('failures_total', fails)} "
-                     "objection(s) answered.")
+                     "objection(s) answered."
+                     + (" STUB — no model was consulted."
+                        if state.get("stub") else ""))
     elif out.get("rule") == "same-round":
         lines.append(f"- Ending: stopped by the same-round rule -- "
                      f"'{out.get('round')}' failed "
@@ -332,13 +348,17 @@ def render(workdir, rec):
     res = rec["stop"]["result"]
     when = time.strftime("%Y-%m-%d %H:%M", time.localtime(rec["t0"]))
     el = rec.get("elapsed_s") or 0.0
-    head = [f"# Run report -- {rec['job']}", "",
+    head = [f"# Run report -- {_one_line(rec['job'])}", "",
             f"Result: {res}",
-            rec["stop"]["sentence"],
-            "",
-            f"Run: {rec['run_id'] or 'never started'} - {when} - "
-            f"took {el:.1f}s - workdir {workdir}",
-            ""]
+            rec["stop"]["sentence"]]
+    if isinstance(rec.get("goldfish_state"), dict) and \
+            rec["goldfish_state"].get("stub"):
+        head.append("STUB — Teardown review used canned verdicts; "
+                    "no model was consulted.")
+    head += ["",
+             f"Run: {rec['run_id'] or 'never started'} - {when} - "
+             f"took {el:.1f}s - workdir {workdir}",
+             ""]
     parts = [head,
              _section1(workdir, rec), [""],
              _section2(rec["goldfish_state"]), [""],
@@ -405,7 +425,7 @@ def _section8_history(entries, workdir=None):
     lines.append(f"- Runs recorded: {len(entries)} (oldest first).")
     for e in entries:
         lines.append(f"- {e.get('run_id')}: {e.get('outcome')} -- "
-                     f"{e.get('job')} "
+                     f"{_one_line(e.get('job'))} "
                      f"({e.get('rounds', '?')} rounds, rule {e.get('rule')}, "
                      f"{e.get('when', '?')})")
     return lines

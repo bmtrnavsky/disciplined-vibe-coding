@@ -43,9 +43,11 @@ or an unreachable provider stops the run as FAILURE (rule
 ``review-error``) -- never as a silent pass.
 
 Test stub: ``DVC_GOLDFISH_STUB`` (comma-separated F/P verdicts consumed in
-call order, one token per review call) is honored only when
-``DVC_TEST_MODE=1`` -- the same gating shape as the sibling project's
-provider stub. Production runs ignore it and call the provider.
+call order, one token per review call) is honored only when the run was
+started with the explicit ``--test-mode`` CLI flag AND ``DVC_TEST_MODE=1``
+— an inherited env var alone never switches the gate off. Every stubbed
+verdict is marked STUB on screen, in goldfish.json, in the call record,
+and in the report.
 """
 
 import argparse
@@ -122,13 +124,16 @@ def _short(h):
     return (h or "?")[:12]
 
 
-def _stub_allowed() -> bool:
-    return os.environ.get(TEST_ENV) == "1"
+def _stub_allowed(test_mode=False) -> bool:
+    # Fix G MED-2: the stub needs the explicit CLI flag, not just an
+    # inherited env var — a cron/CI/agent shell carrying DVC_TEST_MODE=1
+    # must never silently rubber-stamp the review gate.
+    return bool(test_mode) and os.environ.get(TEST_ENV) == "1"
 
 
-def _stub_tokens():
+def _stub_tokens(test_mode=False):
     """Verdict script for tests; None in production (stub ignored there)."""
-    if not _stub_allowed():
+    if not _stub_allowed(test_mode):
         return None
     raw = os.environ.get(STUB_ENV, "")
     tokens = [t.strip().upper() for t in raw.split(",") if t.strip()]
@@ -488,7 +493,8 @@ def parse_verdicts(text: str, rounds: list[str]) -> dict[str, tuple[str, str]]:
 
 
 def do_review_run(workdir, rounds: list[str],
-                   define_spec: bytes | None = None) -> dict:
+                   define_spec: bytes | None = None,
+                   test_mode: bool = False) -> dict:
     """One packet + one model call covering all rounds. Returns the recorded
     call (verdicts, packet path, envelope, raw response)."""
     workdir = Path(workdir)
@@ -500,7 +506,7 @@ def do_review_run(workdir, rounds: list[str],
     brief = build_brief(rounds)
     brief_hash = _sha(brief.encode())
     stub = None
-    tokens = _stub_tokens()
+    tokens = _stub_tokens(test_mode)
     if tokens is not None:
         tok = tokens.pop(0) if tokens else "P"
         text = _stub_response(rounds, "pass" if tok.startswith("P") else "fail")
@@ -533,6 +539,7 @@ def do_review_run(workdir, rounds: list[str],
            "response": text, "model": cfg["model"],
            "provider_request_id": rid or f"stub-{seq:04d}",
            "tokens_in": tin, "tokens_out": tout,
+           "stub": stub is not None,
            "results": {r: {"verdict": v.lower(), "note": n}
                        for r, (v, n) in verdicts.items()},
            "created_at": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
@@ -558,6 +565,7 @@ def new_state(run_id):
         "same_round_limit": SAME_ROUND_LIMIT,
         "total_failure_cap": TOTAL_FAILURE_CAP,
         "total_failures": 0,
+        "stub": False,  # fix G MED-2: True once any verdict was stubbed
         # Counts keyed by round within this run file -- never by spec hash,
         # so a mid-run amendment + re-lock cannot reset them (p_g3 bypass).
         "per_round": {
@@ -609,7 +617,8 @@ def _spec_sha(workdir):
     return _sha(data)
 
 
-def run_loop(workdir, elephant_respond, run_id, define_spec=None):
+def run_loop(workdir, elephant_respond, run_id, define_spec=None,
+             test_mode=False):
     """Run rounds until no objection (PASS) or a stop rule fires (FAIL).
 
     Each iteration assembles a fresh packet from the workdir and makes one
@@ -618,6 +627,9 @@ def run_loop(workdir, elephant_respond, run_id, define_spec=None):
     a response text. Returns the state dict (outcome.result is PASS/FAIL).
     define_spec (bytes) freezes the spec entry at the Define version —
     the reviewer judges that, never the current file (fix E).
+    test_mode (bool) comes from the explicit --test-mode CLI flag: only
+    then may the canned-verdict stub stand in for the provider (fix G),
+    and every stubbed verdict is marked STUB.
     """
     workdir = Path(workdir)
     state = new_state(run_id)
@@ -625,7 +637,8 @@ def run_loop(workdir, elephant_respond, run_id, define_spec=None):
     while True:
         try:
             call = do_review_run(workdir, list(ROUNDS),
-                                 define_spec=define_spec)
+                                 define_spec=define_spec,
+                                 test_mode=test_mode)
         except DvcReviewError as exc:
             seq += 1
             rnd = ROUNDS[0]
@@ -650,6 +663,10 @@ def run_loop(workdir, elephant_respond, run_id, define_spec=None):
                   flush=True)
             return state
         spec_sha = _spec_sha(workdir)
+        if call.get("stub"):
+            state["stub"] = True
+            print("STUB — canned verdict, no model consulted "
+                  f"(packet {call['packet_hash'][:12]})", flush=True)
         failed_rounds = [r for r in ROUNDS
                          if call["results"][r]["verdict"] != "pass"]
         for rnd in ROUNDS:
@@ -667,12 +684,15 @@ def run_loop(workdir, elephant_respond, run_id, define_spec=None):
                     "elephant_response": None,
                 })
                 save_state(workdir, state)
-                print(f"goldfish {rnd}: no objection "
+                stub_mark = " STUB" if call.get("stub") else ""
+                print(f"goldfish {rnd}: no objection{stub_mark} "
                       f"(attempt {st['attempts']}, spec {_short(spec_sha)}, "
                       f"packet {call['packet_hash'][:12]})", flush=True)
                 continue
             ob = (f"OBJECTION {rnd}: {res['note']}"
                   if res["note"] else f"OBJECTION {rnd}: no reason given.")
+            if call.get("stub"):
+                ob += " [STUB — canned verdict, no model consulted]"
             print(ob, flush=True)
             st["fails_consec"] += 1
             state["total_failures"] += 1
@@ -691,7 +711,8 @@ def run_loop(workdir, elephant_respond, run_id, define_spec=None):
                                 "rounds": list(ROUNDS),
                                 "failures_total": state["total_failures"]}
             save_state(workdir, state)
-            print(f"goldfish loop: PASS -- {len(ROUNDS)} rounds, "
+            stub_mark = " STUB — no model consulted" if state["stub"] else ""
+            print(f"goldfish loop: PASS{stub_mark} -- {len(ROUNDS)} rounds, "
                   f"{state['total_failures']} objection(s) answered, "
                   f"run {run_id}", flush=True)
             return state

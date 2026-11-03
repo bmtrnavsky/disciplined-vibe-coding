@@ -151,7 +151,7 @@ def _define_spec_bytes(workdir):
         return None
 
 
-def cmd_teardown_review(workdir, run_id, define_spec):
+def cmd_teardown_review(workdir, run_id, define_spec, test_mode=False):
     # Goldfish (fix A): the reviewer assembles a hash-locked packet of
     # spec + plan + BUILD OUTPUT and reviews it with one model call per
     # iteration (SDDA-shaped). It runs AFTER Build, because a reviewer
@@ -167,7 +167,8 @@ def cmd_teardown_review(workdir, run_id, define_spec):
                 "spec untouched")
 
     state = dvc_goldfish.run_loop(workdir, elephant_respond, run_id,
-                                  define_spec=define_spec)
+                                  define_spec=define_spec,
+                                  test_mode=test_mode)
     return state
 
 
@@ -225,6 +226,19 @@ def _kill_tree(proc):
             pass
 
 
+def _minimal_build_env():
+    """Explicit minimal env for the build subprocess (fix G MED-1).
+
+    The build never inherits the parent env: the reviewer key and any
+    operator credentials in it are unreachable from build commands.
+    Only path/locale/temp keys the child needs to spawn and run.
+    """
+    allow = ("PATH", "SYSTEMROOT", "COMSPEC", "PATHEXT", "SYSTEMDRIVE",
+             "HOME", "USERPROFILE", "TEMP", "TMP",
+             "LANG", "LC_ALL", "LC_CTYPE", "LANGUAGE")
+    return {k: v for k, v in os.environ.items() if k in allow}
+
+
 def cmd_build(workdir, build_cmd):
     stage("Build")
     timeout = _build_timeout()
@@ -246,7 +260,8 @@ def cmd_build(workdir, build_cmd):
                             stderr=subprocess.PIPE,
                             text=True,
                             start_new_session=new_session,
-                            creationflags=flags)
+                            creationflags=flags,
+                            env=_minimal_build_env())
     try:
         # stdin closed (fix B): a build asking for input gets EOF, never
         # an overnight hang. The timeout kills a stuck command instead of
@@ -323,6 +338,10 @@ def main(argv=None):
     ap.add_argument("--fresh", action="store_true",
                     help="start a new run even over a FAILED one; "
                          "the new run cites it in the history")
+    ap.add_argument("--test-mode", action="store_true",
+                    help="allow the canned-verdict reviewer stub "
+                         "(needs DVC_TEST_MODE=1 too); every stubbed "
+                         "verdict is marked STUB. Never for real runs.")
     ns = ap.parse_args(argv)
 
     workdir = Path(ns.workdir)
@@ -439,11 +458,14 @@ def _run(ns, workdir, rec, t0):
                                    "It stopped before the goldfish review."}
         print("STOP: build command failed; run ends here.", flush=True)
         return finish(workdir, rec, 1)
-    state = cmd_teardown_review(workdir, run_id, define_spec)
+    state = cmd_teardown_review(workdir, run_id, define_spec,
+                                test_mode=ns.test_mode)
     rec["goldfish_state"] = state
+    stub_mark = " STUB — no model consulted" if state.get("stub") else ""
     if state["outcome"]["result"] != "PASS":
         gate_or_stop(workdir, rec, "G4", "teardown/goldfish-pass", False,
-                     "goldfish loop ended in FAILURE (see objections above)",
+                     f"goldfish loop ended in FAILURE{stub_mark} "
+                     "(see objections above)",
                      "Verify")
         rule = state["outcome"].get("rule", "?")
         rnd = state["outcome"].get("round", "?")
@@ -455,7 +477,8 @@ def _run(ns, workdir, rec, t0):
               flush=True)
         return finish(workdir, rec, 1)
     gate_or_stop(workdir, rec, "G4", "teardown/goldfish-pass", True,
-                 "goldfish loop PASS, no standing objection", "Verify")
+                 f"goldfish loop PASS{stub_mark}, no standing objection",
+                 "Verify")
     rec["gates"].append({"id": "G6", "name": "verify/done-claim-mapped",
                         "outcome": "PASS",
                         "reason": "Define, Plan, Build, Teardown all passed; "
