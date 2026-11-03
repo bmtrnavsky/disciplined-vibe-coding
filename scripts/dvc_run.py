@@ -40,8 +40,10 @@ Report (card 4/4): every exit — success, FAILED, or NOT BUILT — writes
 without having watched. A stopped run says FAILED or NOT BUILT in
 plain words, never "completed with notes".
 
-History (fix C): every finished run appends to `.pipeline/runs.json`
-(run id, outcome, round count), and the report cites all of them. A
+History (fix C, hardened by fix F): every finished run appends to an
+outside history file (`~/.dvc/history/<workdir-hash>.json`, hash-chained
+so rewrites are detectable; `.pipeline/runs.json` keeps a mirror copy),
+and the report cites all runs and names the history path. A
 second run over a FAILED run refuses to start -- it names the prior
 failure and exits 3 -- unless `--fresh` is passed. A crash writes a
 FAILED report instead of leaving the previous run's report on disk.

@@ -277,6 +277,101 @@ class TestFixESelfDeclare(unittest.TestCase):
             self.assertEqual(packed, define_bytes)
 
 
+class TestFixFPacketTrust(unittest.TestCase):
+    """Fix F HIGH-1: the packet never follows a build-planted link outside.
+
+    The build owns the workdir before packet assembly, so a symlink (or
+    hardlink) naming an outside file must be rejected at assembly and
+    never reach the model provider.
+    """
+
+    def test_symlink_to_outside_secret_is_rejected(self):
+        """A link inside the workdir to an outside file fails closed."""
+        with fresh_workdir() as work:
+            secret = work.parent / "outside-secret.txt"
+            secret.write_text("CANARY-OUTSIDE-SECRET-999\n", encoding="utf-8")
+            (work / ".pipeline" / "plans").mkdir(parents=True, exist_ok=True)
+            (work / ".pipeline" / "to-spec.md").write_text(
+                "# To-spec\n\nrung: probe.\n", encoding="utf-8")
+            try:
+                (work / "artifact-link.txt").symlink_to(secret)
+            except OSError:
+                self.skipTest("platform cannot create symlinks here")
+            with self.assertRaises(gf.DvcReviewError) as ctx:
+                gf.do_packet(work)
+            self.assertIn("artifact-link.txt", str(ctx.exception))
+
+    def test_hardlink_to_outside_is_rejected(self):
+        """A hardlink (nlink > 1) to an outside file fails closed too."""
+        with fresh_workdir() as work:
+            secret = work.parent / "outside-secret.txt"
+            secret.write_text("CANARY-OUTSIDE-SECRET-999\n", encoding="utf-8")
+            (work / ".pipeline" / "plans").mkdir(parents=True, exist_ok=True)
+            (work / ".pipeline" / "to-spec.md").write_text(
+                "# To-spec\n\nrung: probe.\n", encoding="utf-8")
+            try:
+                os.link(secret, work / "artifact-hard.txt")
+            except OSError:
+                self.skipTest("platform cannot create hardlinks here")
+            with self.assertRaises(gf.DvcReviewError):
+                gf.do_packet(work)
+
+    def test_escaping_resolved_path_is_rejected(self):
+        """A path resolving outside the workdir fails even unlinked."""
+        with fresh_workdir() as work:
+            (work / ".pipeline" / "plans").mkdir(parents=True, exist_ok=True)
+            (work / ".pipeline" / "to-spec.md").write_text(
+                "# To-spec\n\nrung: probe.\n", encoding="utf-8")
+            outside = work.parent / "sibling.txt"
+            outside.write_text("sibling\n", encoding="utf-8")
+            rel = os.path.relpath(outside, work)
+            self.assertTrue(rel.startswith(".."))
+            resolved = (work / rel).resolve()
+            self.assertNotIn(str(work.resolve()), str(resolved))
+            with self.assertRaises(gf.DvcReviewError):
+                gf._safe_read_bytes(work.resolve(), work / rel, rel)
+
+
+class TestFixFHistory(unittest.TestCase):
+    """Fix F MED-3: emptying the workdir history cannot erase a FAIL."""
+
+    def test_erased_workdir_history_still_refuses(self):
+        """Wiping `.pipeline/runs.json` does not clear the refusal."""
+        with fresh_workdir() as work, stub_env("F,F"):
+            with isolated_history():
+                code1, _, _ = run_job(work, PASS_BUILD)
+                self.assertEqual(code1, 1)
+                (work / ".pipeline" / "runs.json").write_text(
+                    "[]\n", encoding="utf-8")
+                with stub_env("P"):
+                    code2, out2, _ = run_job(work, PASS_BUILD)
+                self.assertEqual(code2, 3, f"erased history must still refuse:\n{out2}")
+                self.assertIn("REFUSED", out2)
+
+    def test_history_lives_outside_the_workdir(self):
+        """The authoritative history path is not build-writable."""
+        with fresh_workdir() as work, isolated_history():
+            path = dvc_report.history_path_for(work)
+            self.assertNotIn(str(work.resolve()), str(path.resolve()))
+
+
+@contextmanager
+def isolated_history():
+    """Point the external history at a throwaway dir; restore afterwards."""
+    import tempfile as _tf
+    saved = os.environ.get("DVC_HISTORY_DIR")
+    tmp = _tf.mkdtemp(prefix="dvc-hist-")
+    os.environ["DVC_HISTORY_DIR"] = tmp
+    try:
+        yield tmp
+    finally:
+        if saved is None:
+            os.environ.pop("DVC_HISTORY_DIR", None)
+        else:
+            os.environ["DVC_HISTORY_DIR"] = saved
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 class TestGates(unittest.TestCase):
     def test_failing_gate_stops_and_is_named(self):
         """A failing build names its gate (G5) and stops before review."""

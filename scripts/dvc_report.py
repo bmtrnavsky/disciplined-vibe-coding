@@ -20,6 +20,7 @@ never "completed with notes". It is written to
 
 import hashlib
 import json
+import os
 import time
 from pathlib import Path
 
@@ -32,7 +33,64 @@ TEARDOWN_REL = ".pipeline/teardown.md"  # legacy scratch file (pre-fix-A runs on
 PACKETS_REL = ".pipeline/packets"
 REVIEWS_REL = ".pipeline/reviews/goldfish"
 WAYFINDER_REL = ".pipeline/wayfinder.md"
-RUNS_REL = ".pipeline/runs.json"  # fix C: append-only run history
+RUNS_REL = ".pipeline/runs.json"  # fix C: legacy workdir mirror (convenience copy)
+HISTORY_ENV = "DVC_HISTORY_DIR"  # tests point the outside store at a tmp dir
+
+
+def history_path_for(workdir):
+    """Authoritative history file: outside the build-writable workdir.
+
+    The build owns the workdir before and during the run, so a record
+    that lives inside it can be emptied to erase a FAIL (fix F MED-3).
+    One file per workdir, named by the resolved workdir's hash, under
+    ~/.dvc/history (or $DVC_HISTORY_DIR, which tests use to isolate).
+    """
+    override = os.environ.get(HISTORY_ENV, "")
+    base = Path(override) if override else Path.home() / ".dvc" / "history"
+    digest = hashlib.sha256(
+        str(Path(workdir).resolve()).encode("utf-8")).hexdigest()[:16]
+    return base / f"{digest}.json"
+
+
+def _entry_hash(entry):
+    """Hash of one history entry, chaining to the previous entry's hash."""
+    body = {k: v for k, v in entry.items() if k not in ("hash",)}
+    return hashlib.sha256(
+        json.dumps(body, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def history_integrity(workdir):
+    """Check the outside history chain: ok / tampered / legacy / empty.
+
+    A rewrite (emptied file, dropped or edited entry) breaks the hash
+    chain and reads as tampered — never as a clean record. Tampered
+    still refuses (fail closed); the report names it.
+    """
+    path = history_path_for(workdir)
+    try:
+        rows = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return "legacy" if (Path(workdir) / RUNS_REL).is_file() else "empty"
+    if not isinstance(rows, list):
+        return "tampered"
+    if not rows:
+        return "empty"
+    prev = "genesis"
+    for e in rows:
+        if not isinstance(e, dict) or e.get("prev") != prev:
+            return "tampered"
+        if _entry_hash(e) != e.get("hash"):
+            return "tampered"
+        prev = e["hash"]
+    return "ok"
+
+
+def _read_rows(path):
+    try:
+        rows = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return rows if isinstance(rows, list) else None
 GATE_ORDER = ("G1", "G2", "G3", "G4", "G5", "G6", "G7")
 
 
@@ -290,7 +348,7 @@ def render(workdir, rec):
              _section6(workdir, rec), [""],
              ["## 7. Why it stopped", "", rec["stop"]["sentence"], ""],
              [""],
-             _section8_history(rec.get("history") or []), [""]]
+             _section8_history(rec.get("history") or [], workdir), [""]]
     out = []
     for p in parts:
         out.extend(p)
@@ -298,13 +356,18 @@ def render(workdir, rec):
 
 
 def load_history(workdir):
-    """Every recorded run in this workdir, oldest first. Never raises."""
-    try:
-        raw = (Path(workdir) / RUNS_REL).read_text(encoding="utf-8")
-        rows = json.loads(raw)
-    except (OSError, ValueError):
-        return []
-    return rows if isinstance(rows, list) else []
+    """Every recorded run for this workdir, oldest first. Never raises.
+
+    Authoritative store is the outside file (fix F MED-3): emptying the
+    workdir mirror cannot erase a FAIL. The workdir file is read only
+    when no outside store exists yet (pre-fix runs), so old FAILs still
+    refuse after the upgrade.
+    """
+    rows = _read_rows(history_path_for(workdir))
+    if rows is not None:
+        return rows
+    rows = _read_rows(Path(workdir) / RUNS_REL)
+    return rows if rows is not None else []
 
 
 def last_failed_run(workdir):
@@ -329,8 +392,13 @@ def refusal_text(prior):
             "Re-run with --fresh to start a new run that cites this one.")
 
 
-def _section8_history(entries):
+def _section8_history(entries, workdir=None):
     lines = ["## 8. Run history in this workdir", ""]
+    if workdir is not None:
+        lines.append(f"- History file: {history_path_for(workdir)} "
+                     f"(outside the workdir, so the build cannot rewrite it; "
+                     f"integrity: {history_integrity(workdir)}).")
+        lines.append("")
     if not entries:
         lines.append("This is the first recorded run here.")
         return lines
@@ -344,12 +412,40 @@ def _section8_history(entries):
 
 
 def append_history(workdir, entry):
-    """Append one run to the workdir history; the list only ever grows."""
-    path = Path(workdir) / RUNS_REL
-    rows = load_history(workdir)
-    rows.append(entry)
+    """Append one run to the history; the list only ever grows.
+
+    The outside file is authoritative (fix F MED-3) and hash-chained so
+    a rewrite is detectable; the write is atomic (tmp + replace). The
+    workdir file stays as a convenience mirror for readers.
+    """
+    path = history_path_for(workdir)
+    rows = _read_rows(path)
+    if rows is None:
+        rows = _read_rows(Path(workdir) / RUNS_REL) or []
+    # Re-chain legacy (pre-fix) rows missing chain keys so the upgrade
+    # keeps their FAILs blocking; rows carrying hash keys that no longer
+    # verify are left untouched — history_integrity reports them tampered.
+    chained = []
+    prev = "genesis"
+    for e in rows:
+        e = dict(e)
+        if "hash" not in e and "prev" not in e:
+            e["prev"] = prev
+            e["hash"] = _entry_hash(e)
+        chained.append(e)
+        prev = e.get("hash") or prev
+    rows = chained
+    entry = dict(entry)
+    entry["prev"] = prev
+    entry["hash"] = _entry_hash(entry)
+    rows = rows + [entry]
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(rows, indent=2) + "\n", encoding="utf-8")
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(rows, indent=2) + "\n", encoding="utf-8")
+    os.replace(tmp, path)
+    mirror = Path(workdir) / RUNS_REL
+    mirror.parent.mkdir(parents=True, exist_ok=True)
+    mirror.write_text(json.dumps(rows, indent=2) + "\n", encoding="utf-8")
     return rows
 
 

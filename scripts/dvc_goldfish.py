@@ -54,6 +54,7 @@ import json
 import os
 import random
 import re
+import stat
 import sys
 import time
 import urllib.request
@@ -167,20 +168,23 @@ def _packet_files(workdir: Path, define_spec: bytes | None = None):
     the spec cannot shrink what the reviewer judges.
     """
     workdir = Path(workdir)
+    root = workdir.resolve()
     files: list[tuple[str, bytes]] = []
     if define_spec is not None:
         files.append((".pipeline/to-spec.md", define_spec))
     else:
-        spec = workdir / ".pipeline" / "to-spec.md"
         try:
-            files.append((".pipeline/to-spec.md", spec.read_bytes()))
+            files.append((".pipeline/to-spec.md",
+                          _safe_read_bytes(root, workdir / ".pipeline" / "to-spec.md",
+                                           ".pipeline/to-spec.md")))
         except OSError as exc:
             raise DvcReviewError("packet cannot be assembled: spec unreadable "
                                  f"({exc}); failing closed") from None
     lock = workdir / ".pipeline" / "spec.lock"
-    if lock.is_file():
-        files.append((".pipeline/spec.lock", lock.read_bytes()))
-    else:
+    try:
+        files.append((".pipeline/spec.lock",
+                      _safe_read_bytes(root, lock, ".pipeline/spec.lock")))
+    except OSError:
         files.append((".pipeline/lock-pending.txt",
                       b"no spec.lock yet (pre-lock review)\n"))
     plans = sorted((workdir / ".pipeline" / "plans").glob("*.md"))
@@ -190,7 +194,8 @@ def _packet_files(workdir: Path, define_spec: bytes | None = None):
     for plan in plans:
         try:
             files.append((plan.relative_to(workdir).as_posix(),
-                          plan.read_bytes()))
+                          _safe_read_bytes(root, plan,
+                                           plan.relative_to(workdir).as_posix())))
         except OSError:
             continue
     outputs, inventory = _collect_outputs(workdir)
@@ -207,17 +212,66 @@ def _packet_files(workdir: Path, define_spec: bytes | None = None):
     return files
 
 
+def _safe_read_bytes(root: Path, path: Path, rel: str) -> bytes:
+    """Read one workdir file without trusting workdir contents (fix F).
+
+    The build owns the workdir before packet assembly, so every candidate
+    is checked before it is read: a symlink is refused outright, a
+    hardlink (nlink > 1, one file with two names) is refused, and a path
+    resolving outside the workdir is refused. The open itself refuses to
+    follow a link (O_NOFOLLOW where the platform has it). Trust violations
+    raise DvcReviewError (fail closed); a simply missing file raises
+    OSError so callers keep their missing-vs-hostile distinction.
+    """
+    try:
+        st = os.lstat(path)
+    except OSError:
+        raise
+    if stat.S_ISLNK(st.st_mode):
+        raise DvcReviewError(
+            f"packet refuses link: {rel} is a symlink; failing closed")
+    if st.st_nlink > 1:
+        raise DvcReviewError(
+            f"packet refuses link: {rel} has {st.st_nlink} hardlinks; "
+            f"failing closed")
+    try:
+        real = path.resolve()
+    except OSError as exc:
+        raise DvcReviewError(
+            f"packet cannot resolve {rel} ({exc}); failing closed") from None
+    if real != root and root not in real.parents:
+        raise DvcReviewError(
+            f"packet refuses escape: {rel} resolves outside the workdir; "
+            f"failing closed")
+    try:
+        fd = os.open(os.fspath(path),
+                     os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    except OSError as exc:
+        raise DvcReviewError(
+            f"packet cannot open {rel} ({exc}); failing closed") from None
+    try:
+        with os.fdopen(fd, "rb") as fh:
+            return fh.read()
+    except OSError as exc:
+        raise DvcReviewError(
+            f"packet cannot read {rel} ({exc}); failing closed") from None
+
+
 def _collect_outputs(workdir: Path):
     """Build output: text files enter the packet; anything else (binaries
     like .db files) is listed in the inventory only, never inlined.
     Inlining binary bytes as decoded text shows the reviewer mojibake it
     then misreads as content — the sibling project's packet excludes data
-    files for the same reason. Returns (included, inventory_lines)."""
+    files for the same reason. Returns (included, inventory_lines).
+
+    Every candidate goes through _safe_read_bytes: a build-planted link
+    to an outside file is refused at assembly and never reaches the
+    model provider (fix F HIGH-1).
+    """
     included = []
     inventory = []
+    root = Path(workdir).resolve()
     for path in sorted(workdir.rglob("*")):
-        if not path.is_file():
-            continue
         try:
             rel = path.relative_to(workdir).as_posix()
         except ValueError:
@@ -226,13 +280,13 @@ def _collect_outputs(workdir: Path):
         if top in SKIP_TOP or path.suffix == ".pyc":
             continue
         try:
-            size = path.stat().st_size
+            st = os.lstat(path)
         except OSError:
             continue
-        try:
-            data = path.read_bytes()
-        except OSError:
-            continue
+        if not (stat.S_ISREG(st.st_mode) or stat.S_ISLNK(st.st_mode)):
+            continue  # dirs, fifos, sockets never enter the packet
+        data = _safe_read_bytes(root, path, rel)  # raises on link/escape
+        size = len(data)
         try:
             data.decode("utf-8")
         except UnicodeDecodeError:
