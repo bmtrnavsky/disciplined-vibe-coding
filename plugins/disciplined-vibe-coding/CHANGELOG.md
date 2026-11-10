@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.3.1 - 2026-11-10
+
+Ticket-splitting lands as an opt-in skill, plus two Opus review rounds that
+make the gates tell the truth. Covered by `tests/dvc_behavioural.py` (35/35);
+`scripts/selfcheck.sh` passes 56/56 but is lint only and proves nothing on
+its own.
+
+- Added (b4455ba): `to-tickets` — an optional step after `plan` that cuts a
+  full-spec plan into one build card per ticket with explicit `blocked by:`
+  edges. Opt-in, full-spec and above only; plans that skip it are unchanged.
+- Changed (e77ee1b, 88b773d): `plan` auto-fires `to-tickets` when it produces
+  a full-spec plan, and publishing the ticket set is gated — the quiz is
+  mandatory because publish dispatches workers, and
+  `scripts/dvc_tickets.py check --tickets <ids>` is the gate that confirms
+  approval was recorded. Headless runs draft under `.pipeline/tickets/` and
+  stop.
+- Fixed (e77ee1b): G3 grades real plan shape, so a junk ticket file FAILS and
+  a real ticketed plan PASSES, instead of a word match. Self-check gates stop
+  claiming more than they check; the shipped `to-tickets` contradictions are
+  resolved.
+- Fixed (88b773d): pre-build gate — `scripts/dvc_stage.py` records a Teardown
+  PASS and refuses Build ahead of it; `bypass` requires `--by` and `--why`, so
+  the tool cannot write an unlogged bypass; publish requires a recorded
+  approval. Six minors from the same round.
+
 ## 0.3.0 - 2026-11-02
 
 Fixes A–G (runner hardening series, all covered by
