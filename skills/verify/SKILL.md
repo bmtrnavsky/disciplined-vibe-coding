@@ -10,7 +10,10 @@ phase: Verify
 Nothing is done until fresh evidence, read in full, proves it.
 
 ## Steps (in order)
-1. **Re-run, fresh.** Plan checks now; earlier output describes earlier code.
+1. **Re-run, fresh — and check the stage record first.** `python scripts/dvc_stage.py check`
+   must exit 0: a missing or red stage record is a pipeline defect, not a
+   warning, and it makes the done-claim unverifiable. Then run the plan checks
+   now; earlier output describes earlier code.
 2. **Classify evidence honestly:**
    - *Terminal:* commands re-run this session.
    - *User-attested:* User-run checks; labeled, never simulated.

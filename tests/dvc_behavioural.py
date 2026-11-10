@@ -33,6 +33,8 @@ import dvc_gates  # noqa: E402
 import dvc_goldfish as gf  # noqa: E402
 import dvc_report  # noqa: E402
 import dvc_run  # noqa: E402
+import dvc_stage  # noqa: E402
+import dvc_tickets  # noqa: E402
 import spec_lock  # noqa: E402
 
 FIX = ROOT / "tests" / "fixtures"
@@ -562,6 +564,137 @@ class TestFixGRunnerHygiene(unittest.TestCase):
             self.assertEqual(verdicts[0], "Result: FAILED",
                              f"true verdict must come first, got: {verdicts}")
             self.assertNotIn("Result: SUCCEEDED", verdicts)
+
+
+def stage_record(stage_name, gate="G?", result="PASS", **kw):
+    return {"stage": stage_name, "gate": gate, "result": result, **kw}
+
+
+def write_stage_log(work, *records):
+    path = work / ".pipeline" / "stages.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("".join(json.dumps(r) + "\n" for r in records),
+                    encoding="utf-8")
+    return path
+
+
+class TestStageGateLog(unittest.TestCase):
+    """M2: the interactive stage log is checkable, and the pre-build gate
+    (M1) is one of its rules."""
+
+    def test_no_log_reads_as_an_unlogged_bypass(self):
+        with fresh_workdir() as work:
+            ok, why = dvc_stage.check(work)
+            self.assertFalse(ok)
+            self.assertIn("unlogged", why)
+
+    def test_full_pass_sequence_passes(self):
+        with fresh_workdir() as work:
+            write_stage_log(work, *(stage_record(s) for s in dvc_stage.STAGES))
+            ok, why = dvc_stage.check(work)
+            self.assertTrue(ok, why)
+
+    def test_failed_gate_without_a_logged_bypass_stops_the_check(self):
+        failed = [stage_record("Define"), stage_record("Economy"),
+                  stage_record("Plan", "G3", "FAIL"), stage_record("Teardown"),
+                  stage_record("Build"), stage_record("Verify")]
+        with fresh_workdir() as work:
+            write_stage_log(work, *failed)
+            ok, why = dvc_stage.check(work)
+            self.assertFalse(ok)
+            self.assertIn("G3", why)
+        with fresh_workdir() as work:
+            write_stage_log(work, *(failed[:3] + [stage_record(
+                "Plan", "G3", "BYPASS", by="Brad", why="probe")] + failed[3:]))
+            ok, why = dvc_stage.check(work)
+            self.assertTrue(ok, why)
+
+    def test_bypass_cannot_be_written_without_who_and_why(self):
+        with fresh_workdir() as work:
+            for argv in (["--stage", "Plan", "--gate", "G3"],
+                         ["--stage", "Plan", "--gate", "G3", "--by", "Brad"]):
+                with self.assertRaises(SystemExit) as ctx, \
+                        redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                    dvc_stage.main(["--workdir", str(work), "bypass"] + argv)
+                self.assertEqual(ctx.exception.code, 2)
+            self.assertFalse((work / ".pipeline" / "stages.jsonl").exists())
+
+    def test_build_before_teardown_is_refused(self):
+        """M1 in code: the pre-build teardown gate."""
+        with fresh_workdir() as work:
+            write_stage_log(work, stage_record("Define"), stage_record("Economy"),
+                            stage_record("Plan"), stage_record("Build", "G5"),
+                            stage_record("Teardown", "G4"), stage_record("Verify"))
+            ok, why = dvc_stage.check(work)
+            self.assertFalse(ok)
+            self.assertIn("pre-build gate", why)
+
+
+    def test_before_build_refuses_a_missing_or_failed_gate(self):
+        """The in-the-moment gate: execute asks before Build, not after."""
+        with fresh_workdir() as work:
+            write_stage_log(work, stage_record("Define"), stage_record("Economy"),
+                            stage_record("Plan", "G3", "FAIL"))
+            ok, why = dvc_stage.check(work, "Build")
+            self.assertFalse(ok)
+            self.assertIn("G3", why)
+            write_stage_log(work, stage_record("Define"), stage_record("Economy"),
+                            stage_record("Plan"))
+            ok, why = dvc_stage.check(work, "Build")
+            self.assertFalse(ok)
+            self.assertIn("unlogged", why)
+            write_stage_log(work, stage_record("Define"), stage_record("Economy"),
+                            stage_record("Plan"), stage_record("Teardown", "G4"))
+            ok, why = dvc_stage.check(work, "Build")
+            self.assertTrue(ok, why)
+
+
+class TestTicketPublishGate(unittest.TestCase):
+    """M7: publish needs a recorded approval, and only an explicit
+    --interactive session can record one."""
+
+    def _plan(self, work, text="# Plan\n\n1. one\n"):
+        plan = work / ".pipeline" / "plans" / "01-x.md"
+        plan.parent.mkdir(parents=True, exist_ok=True)
+        plan.write_text(text, encoding="utf-8")
+        return plan
+
+    def _run(self, work, tail):
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            return dvc_tickets.main(["--workdir", str(work)] + tail)
+
+    def test_headless_run_cannot_approve(self):
+        with fresh_workdir() as work:
+            self._plan(work)
+            code = self._run(work, ["--tickets", "T1", "approve"])
+            self.assertEqual(code, 2)
+            self.assertFalse((work / ".pipeline" / "ticket-approval.json").exists())
+
+    def test_approval_gates_the_publish_and_binds_the_plan(self):
+        with fresh_workdir() as work:
+            plan = self._plan(work)
+            self.assertEqual(self._run(work, ["--tickets", "T1,T2", "--interactive",
+                                              "--by", "Brad", "approve"]), 0)
+            self.assertEqual(self._run(work, ["--tickets", "T1,T2", "check"]), 0)
+            self.assertEqual(self._run(work, ["--tickets", "T1,T3", "check"]), 1)
+            plan.write_text("# Plan\n\n1. two\n", encoding="utf-8")
+            self.assertEqual(self._run(work, ["--tickets", "T1,T2", "check"]), 1)
+
+
+class TestG6DerivedFromTheRecord(unittest.TestCase):
+    """m1: G6 is a function of the gate record, not of control flow."""
+
+    def test_g6_fails_when_an_earlier_gate_recorded_fail(self):
+        with fresh_workdir() as work:
+            rec = dvc_report.new_record("g6 probe")
+            for gid in ("G1", "G2", "G3", "G4", "G5"):
+                rec["gates"].append({"id": gid, "name": gid,
+                                     "outcome": "FAIL" if gid == "G4" else "PASS",
+                                     "reason": "probe"})
+            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                self.assertFalse(dvc_run.cmd_verify(work, rec, "0" * 64, ()))
+            g6 = [g for g in rec["gates"] if g["id"] == "G6"]
+            self.assertEqual(g6[-1]["outcome"], "FAIL")
 
 
 if __name__ == "__main__":

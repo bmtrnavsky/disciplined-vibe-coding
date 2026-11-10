@@ -12,6 +12,9 @@ Commit history is the only audit trail.
 ## Invocation points
 - Build: commit at every `execute` checkpoint — narrative, one logical change.
 - Verify: releases only after verify green.
+- Ticket builds: write the commit sha into the ticket's rollback line (card
+  body, or the ticket's section in the plan) at commit time. to-tickets ships
+  that line as an instruction; the commit is where the sha exists.
 
 ## Steps
 1. **Narrative commits.** Why over what. Imperative. One logical change.

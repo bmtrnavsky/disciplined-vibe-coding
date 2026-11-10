@@ -25,10 +25,30 @@ drafting is free and publishing dispatches workers (spend):
 **May publish when all hold:**
 1. The draft exists and the quiz (§5) is approved by the user.
 2. Teardown has passed on the plan that carries the ticket groups.
+3. `scripts/dvc_tickets.py --tickets T1,T2,... check` exits 0. That command
+   is the recorded proof of 1 and 2: `approve --interactive --by NAME` writes
+   who approved which ticket set, bound to the plan's sha256. No record, no
+   publish — and a headless run cannot make one, because `approve` refuses
+   without the explicit `--interactive` flag.
 
 Do not fire when: the rung is below full-spec; the plan is already ticketed
 (its ticket groups exist); or the next move would be publishing from a headless
 run — headless runs draft under `.pipeline/tickets/` and stop.
+
+## What is enforced, and what is guidance
+
+No claim below is quietly demoted: each one either fails a command or is
+stated as judgment.
+
+| Claim | Status | Where |
+|---|---|---|
+| interactive session before publishing | **ENFORCED** — `approve` exits 2 without `--interactive` | §5 |
+| quiz approved before any `kanban_create` | **ENFORCED at the publish step** — `check` exits 1 without a matching record; publishing without running it is an unlogged approval, a pipeline defect | §6 |
+| approval binds the plan it approved | **ENFORCED** — the record holds the plan's sha256 | §6 |
+| every plan step in exactly one ticket | guidance — plan prose has no machine-readable step→ticket map; the cut is checked by re-reading it against Steps | §2 |
+| assignee on every card | guidance — no API refuses an unassigned card, so the publish step lists the cards it created and confirms it | §6 |
+| stop on a partial publish, no retry | guidance — it depends on a tool failing mid-loop, which cannot be pre-checked | §6 |
+| size trigger: 8+ steps, 2+ workers, multi-session | guidance — the 8-step count is done while reading the plan; workers and sessions are judgment | When this fires |
 
 ## Steps, in order
 
@@ -119,10 +139,27 @@ Then ask exactly three questions:
 Iterate until approved. On the third pass with no agreement, stop and report
 what is unresolved: size questions are usually a scope question in disguise.
 
+When the user approves, record it — this is the only interactivity signal in
+the pack, never inferred:
+
+```sh
+python scripts/dvc_tickets.py --interactive --by <name> --tickets T1,T2 approve
+```
+
+No flag, no record, no publish. Editing the plan after the record (including
+the DRAFT re-stamp from §1) breaks the binding, so re-approve after any edit.
+
 ### 6. Publish to the board
 
-Publish only after the quiz is approved AND teardown has passed, and only as
-cards:
+Publish only after the quiz is approved AND teardown has passed. Run the gate
+first and stop on a non-zero exit — that command is the only thing that tells
+you approval was recorded:
+
+```sh
+python scripts/dvc_tickets.py --tickets T1,T2 check
+```
+
+Then, only as cards:
 
 - One card per ticket. Never one card holding a list.
 - `parents=[...]` carries the blocking edges. The board already promotes a child
@@ -131,10 +168,17 @@ cards:
 - Publish in dependency order so every parent id exists before it is referenced.
 - Assign the right profile. A card without an assignee is never dispatched, so an
   unassigned card is an unfinished publish.
+- Record the returned card id next to its ticket heading in the plan:
+  `### T2 <title> — card: t_ab12`. The plan is the one artifact; the id beside
+  the ticket is what lets a later session match board to plan without guessing.
 - Link the milestone card as the parent of the fan-out, or note it in the body
   when the milestone has no card.
 - The card body is the ticket: what to build, acceptance checks, verify command,
   rollback line, and the plan section to read first.
+
+After creating the cards, list them and confirm every one has an assignee and
+the drawn edges. Cards that fail that read-back are an unfinished publish:
+report them, do not quietly move on.
 
 If publishing fails partway, report the cards created so far and stop. Do not
 retry into a half-published graph — duplicates in a dependency graph are worse
@@ -164,12 +208,17 @@ Read plan section <T<n>> before starting: it holds the exact paths.
 <the exact re-runnable command from the plan>
 
 ## Rollback
-Revert this ticket's commit (<sha> is recorded at commit time).
+Revert this ticket's commit. `version` writes its sha into this line at
+commit time.
 ```
 
 No absolute file paths in the card body. The plan holds them, the card points at
 the plan section. A card that survives a file move is worth more than one that
 saves a hop.
+
+The rollback sha is `version`'s to write, not this skill's: to-tickets never
+touches git, so the line ships as an instruction and the commit step fills it
+(`version`, Invocation points).
 
 ## Vocabulary (the whole change)
 
@@ -200,8 +249,10 @@ makes rollback a revert and makes cross-session resume a named thing.
 
 - Every plan step sits in exactly one ticket; every ticket has an edge line, a
   verify command, and a rollback line.
-- The user approved size and edges.
+- The user approved size and edges, and the approval is recorded:
+  `dvc_tickets.py --tickets <ids> check` exits 0.
 - Cards exist, each with a parent set and an assignee, and the frontier was named.
+- Every card id is written next to its ticket heading in the plan.
 - Nothing outside the plan file, the board and `.pipeline/tickets/` was written.
 
 ## Cognitive traps

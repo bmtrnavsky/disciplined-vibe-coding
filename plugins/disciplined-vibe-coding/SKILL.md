@@ -48,6 +48,16 @@ fixing it is an explicit user bypass, logged in the Wayfinder result
 who approved, what was red, and why it was waived. An unlogged
 bypass is a pipeline defect, counted the same as a skipped stage. A
 gate that slows the builder gets fixed; it never gets silently skipped.
+Interactive sessions carry that rule in a checkable form:
+`scripts/dvc_stage.py log` records each stage exit (stage, gate,
+PASS/FAIL, one-line reason), `scripts/dvc_stage.py bypass --by NAME
+--why REASON` records a waiver — both flags required, so the tool
+cannot write an unlogged bypass — and `scripts/dvc_stage.py check`
+fails on a missing stage record, a FAIL with no later bypass, or a
+Build recorded before a Teardown pass. `verify` runs that check before
+any done-claim. A stage with no record at all cannot be told from a
+silent bypass, so it counts as one: that is the defect the log exists
+to make countable.
 Since card series DVC 1/4 the spec record is hashed at Define, and fix B
 made it a gate: `dvc_run.py` hashes the spec at Define, declared drift
 stays advisory, and undeclared drift fails the run at Verify (G7).
@@ -75,7 +85,7 @@ artifact.
 | 1. Define (grill-with-docs → to-spec) | `intake`, `brainstorm`, `research` | `.pipeline/to-spec.md` (workdir; vault note only if durable) |
 | 2. Economy gate (scope rung) | this file, `references/economy-ladder.md` | one declared sentence in the to-spec |
 | 3. Plan (writing-plans format) | `plan` | `.pipeline/plans/NN-<milestone>.md`, or 3 bullets at micro-spec |
-| 3.5. Teardown (goldfish pre-build review) | this file §3.5 | round notes in plan/to-spec + wayfinder pass/fail |
+| 3.5. Teardown (goldfish pre-build review; headless is post-build, §3.5a) | this file §3.5 | round notes in plan/to-spec + wayfinder pass/fail |
 | 4. Build (working-tree-only, test-first) | `execute`, `test-first`, `debug` | code + failing-then-passing tests |
 | 5. Verify (local proof + drift) | `verify` | fresh evidence, compact report, plan-file table |
 | 6. Commit (one feature, one build, one commit) | `version` | narrative commit; changelog at full-spec+, tag at project |
@@ -126,7 +136,7 @@ Full format at full-spec rung and above (`templates/writing-plan.md`):
 steps, files touched, test strategy, verify criteria, commit message draft.
 At micro-spec rung it collapses to 3 bullets. Never freeform
 "I'll figure it out as I go."
-`to-tickets` fires on its conditions, not on request: at full-spec rung and above, with an approved plan, when the work needs the split (8+ steps, 2+ workers, or multi-session), it cuts ticket groups with explicit `blocked by:` edges inside this plan file. Draft before teardown; publish only after teardown passes and the quiz is approved — the quiz stays mandatory because publishing dispatches workers. Headless runs draft under `.pipeline/tickets/` and stop. Do not fire below full-spec, on a plan already ticketed, or to publish from a headless run.
+`to-tickets` fires on its conditions, not on request: at full-spec rung and above, with an approved plan, when the work needs the split (8+ steps, 2+ workers, or multi-session), it cuts ticket groups with explicit `blocked by:` edges inside this plan file. Draft before teardown; publish only after teardown passes and the quiz is approved — the quiz stays mandatory because publishing dispatches workers, and `scripts/dvc_tickets.py check --tickets <ids>` is the gate that tells the skill approval was recorded. Headless runs draft under `.pipeline/tickets/` and stop: with no `--interactive` approval they cannot pass that check. Do not fire below full-spec, on a plan already ticketed, or to publish from a headless run.
 
 ## 3.5. Teardown — goldfish review before code counts
 
@@ -134,6 +144,26 @@ Teardown happens here, between Plan and Build: it reviews the spec and plan
 before any code is written. Reviewing the spec after the build would only
 find problems already cemented in code. Post-build checking belongs to
 Verify (local proof) and drift, not to teardown.
+
+### 3.5a Pre-build or post-build: the one place the runner differs
+
+The rule above is the interactive rule, and it is the one this doctrine
+runs on. `dvc_run.py` cannot hold it: its reviewer reads the build output,
+so that pass runs after Build and is the **post-build drift review**
+(gate G4), a different job with a different name. Both halves are stated:
+
+- **Interactive (this doctrine):** teardown reviews spec and plan before
+  code exists. Exit it with `scripts/dvc_stage.py log --stage Teardown
+  --gate G4 --result PASS --reason "..."`; `dvc_stage.py check` then
+  refuses any log where Build comes before a Teardown pass.
+- **Headless (`dvc_run.py`):** G4 is the post-build drift review; the
+  post-build checks the doctrine already assigns to Verify are G5 (proof
+  green) and G7 (spec stable). **No pre-build review gate exists there.**
+
+That gap is stated, not implied. An autonomous run has no human and no
+pre-build plan it did not write itself, so it substitutes the post-build
+drift review. Interactive sessions carry the pre-build gate because that
+is where a plan worth reviewing exists.
 
 Run the teardown with goldfish eyes: spec plus linked sources only,
 earlier conversation ignored. The reviewer opens only the spec plus
@@ -167,13 +197,16 @@ that fired the gate.
 Unchanged builder invariants: all edits in the working tree, tests written
 before or with the code (`test-first`), local proof before claiming done.
 These are builder habits, not gates. Nothing fires, nothing blocks. Build
-starts only after Teardown passes (§3.5) — no code exists before review.
+starts only after Teardown passes (§3.5; headless: the post-build drift
+review in §3.5a) — no code exists before review.
 
 ## 5. Verify — local proof, then drift
 
 Two jobs, in this order: prove the code works locally, then check you built
-what was spec'd. Teardown already ran pre-build (§3.5); Verify trusts the
-reviewed spec and checks the code against it.
+what was spec'd. Teardown already ran pre-build (§3.5; headless: its
+post-build drift review is §3.5a); Verify trusts the reviewed spec and
+checks the code against it. First run `scripts/dvc_stage.py check`: a
+missing or red stage record means the done-claim is not verifiable yet.
 
 ### 5a. Local proof
 
@@ -214,7 +247,12 @@ with zero re-brief.
 - Evidence table: appended to the plan file (`verify`), chat-only at
   one-liner rung (no plan file exists there).
 - Teardown round notes: plan file (full-spec+) or to-spec (micro-spec).
-- Gate results: one result line per stage exit in `.pipeline/wayfinder.md`.
+- Gate results: one result line per stage exit in `.pipeline/wayfinder.md`,
+  and the machine-checkable copy in `.pipeline/stages.jsonl`
+  (`scripts/dvc_stage.py log|bypass|check`).
+- Ticket approval: `.pipeline/ticket-approval.json` — who approved which
+  ticket set, bound to the plan's sha256 (`scripts/dvc_tickets.py
+  approve --interactive --by NAME`).
 - Research trail: `.pipeline/read.log` entries (`research`).
 - Spec lock: `.pipeline/spec.lock` — sha256 at Define, declarations on
   change (`spec_lock.py lock` / `declare --by NAME --why REASON`).
@@ -230,7 +268,10 @@ at Verify (gate G7 spec-stable): a build that rewrites the spec to
 
 ## v0.2.0 resolutions
 
-- Teardown runs pre-build (§3.5), between Plan and Build — never post-build.
+- Teardown runs pre-build (§3.5), between Plan and Build — never post-build
+  in an interactive session. The headless runner's post-build goldfish pass
+  is the drift review, and §3.5a names it as such instead of calling it
+  teardown.
 - Commit ceremony is rung-scaled: changelog at full-spec+, tags for
   project-rung releases only; routine work ships as one commit, no release.
 - Gates are checkable: Wayfinder records a pass/fail result per stage exit;

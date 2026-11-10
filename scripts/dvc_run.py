@@ -7,7 +7,11 @@ failed build command stops it (exit 1). It never waits for a human.
 
 Order is Define → Plan → Build → Teardown(review) → Verify (fix A):
 the goldfish reviews the build output, not a plan. A reviewer that never
-sees what was built cannot review the build.
+sees what was built cannot review the build. This pass is the post-build
+DRIFT review (M1): the doctrine's pre-build teardown gate lives in
+interactive sessions (`scripts/dvc_stage.py check`), which this runner
+cannot hold — its plan is its own boilerplate and no human is present.
+The two names are separate jobs, and both docs say so.
 
 No build command means NOT BUILT (fix B): a run with no --build built
 nothing, so it cannot pass — the run stops at Build with result
@@ -72,7 +76,6 @@ import dvc_gates  # noqa: E402  (automatic checks for every pipeline gate)
 import dvc_goldfish  # noqa: E402  (SDDA-shaped packet + one-shot review)
 import dvc_report  # noqa: E402  (end-of-run report Brad reads afterwards)
 
-STAGES = ("Define", "Plan", "Build", "Teardown", "Verify")
 DEFAULT_SPEC = ".pipeline/to-spec.md"
 
 
@@ -159,8 +162,10 @@ def cmd_teardown_review(workdir, run_id, define_spec, test_mode=False):
     # Goldfish (fix A): the reviewer assembles a hash-locked packet of
     # spec + plan + BUILD OUTPUT and reviews it with one model call per
     # iteration (SDDA-shaped). It runs AFTER Build, because a reviewer
-    # that never sees what was built cannot review the build. Rework =
-    # new build output on disk; the loop never touches the spec.
+    # that never sees what was built cannot review the build. That makes
+    # it the post-build DRIFT review, not the doctrine's pre-build
+    # teardown (M1: see the module docstring). Rework = new build output
+    # on disk; the loop never touches the spec.
     # The packet uses the spec as locked at Define (fix E), never the
     # current file: a build that hollowed the spec gets judged against
     # the real one.
@@ -301,23 +306,32 @@ def cmd_build(workdir, build_cmd):
     return rc
 
 
-def cmd_verify(workdir, rec, locked_hash, gates_passed, build_decls=()):
-    # G6 done-claim-mapped: Verify is reached only because every earlier
-    # gate passed. The caller asserts this from the in-run record; Verify
-    # re-states it so a reader can see the mapping without trusting flow.
+GATE_IDS_BEFORE_VERIFY = ("G1", "G2", "G3", "G4", "G5")
+
+
+def cmd_verify(workdir, rec, locked_hash, build_decls=()):
+    # G6 done-claim-mapped (m1): derived from the in-run gate RECORD, not
+    # from control flow. Every earlier gate id must be recorded PASS; a
+    # record with one missing or FAIL makes G6 record FAIL and Verify
+    # return False. The gate writes its own line, so the line and the
+    # record cannot disagree.
     # G7 spec-stable (fix B): undeclared drift FAILS the run here. A
     # build that rewrote the spec to "do nothing" is caught by this
     # gate — Verify returns False and the caller reports FAILED.
     # Fix E: a declaration added during the Build window fails too —
-    # build_decls holds the pre-Build declaration keys, so G7 can tell
-    # a legitimate mid-run amendment from the builder declaring itself.
+    # build_decls holds the Build-window delta (the keys added while the
+    # builder held the workdir; m3), so G7 can tell a legitimate mid-run
+    # amendment from the builder declaring itself.
     stage("Verify")
+    recorded = {g["id"]: g["outcome"] for g in rec["gates"]}
+    gates_passed = all(recorded.get(g) == "PASS" for g in GATE_IDS_BEFORE_VERIFY)
     gate_or_stop(workdir, rec, "G6", "verify/done-claim-mapped",
                  gates_passed,
-                 "Define, Plan, Build, Teardown all passed; this Verify maps to them"
+                 "Define, Economy, Plan, Build and Teardown all recorded PASS; "
+                 "this Verify maps to them"
                  if gates_passed else
-                 "Verify reached with an earlier gate unpassed",
-                 "run end", record=False)
+                 "Verify reached with an earlier gate not recorded PASS",
+                 "run end")
     if not gates_passed:
         # Unreachable through main() — earlier stops return first — but a
         # caller that bypasses the chain must still be named, not trusted.
@@ -453,7 +467,7 @@ def _run(ns, workdir, rec, t0):
                          f"killed. It stopped before the goldfish review.")}
         print("STOP: build timed out; run ends here.", flush=True)
         return finish(workdir, rec, 1)
-    ok, why = dvc_gates.check_build(rc, bool(ns.build))
+    ok, why = dvc_gates.check_build(rc, bool(ns.build), _build_timeout())
     if not gate_or_stop(workdir, rec, "G5", "build/proof-green",
                         ok, why, "Teardown(review)"):
         rec["stop"] = {"result": "FAILED",
@@ -483,11 +497,7 @@ def _run(ns, workdir, rec, t0):
     gate_or_stop(workdir, rec, "G4", "teardown/goldfish-pass", True,
                  f"goldfish loop PASS{stub_mark}, no standing objection",
                  "Verify")
-    rec["gates"].append({"id": "G6", "name": "verify/done-claim-mapped",
-                        "outcome": "PASS",
-                        "reason": "Define, Plan, Build, Teardown all passed; "
-                                  "this Verify maps to them"})
-    if not cmd_verify(workdir, rec, locked_hash, True, build_window):
+    if not cmd_verify(workdir, rec, locked_hash, build_window):
         # G7 spec-stable (fix B): undeclared drift — e.g. a build that
         # rewrote the spec to "do nothing" — fails the run at Verify.
         # Fix E: a Build-window self-declaration fails here too.

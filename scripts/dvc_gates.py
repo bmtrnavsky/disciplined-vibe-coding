@@ -19,7 +19,11 @@ Gate table (id, what it means, status, check):
       Files touched / Verify / Rollback headings) or the ladder's micro
       shape ("# Plan ... micro"). A ticket file or junk fails here.
   G4 teardown/goldfish-pass  blind review raised no standing objection
-      AUTO: dvc_goldfish.run_loop outcome is PASS (card 2 stop rules)
+      AUTO: dvc_goldfish.run_loop outcome is PASS (card 2 stop rules).
+      This is the POST-BUILD DRIFT REVIEW (M1), not the doctrine's
+      pre-build teardown (SKILL.md section 3.5a): the packet carries the
+      build output, so it can only run after Build. The pre-build gate
+      is interactive (`scripts/dvc_stage.py check --before Build`).
   G5 build/proof-green       the build proof passed
       AUTO: --build command exited 0. With no --build command the run
       FAILS as NOT BUILT: a run that built nothing must never read as a
@@ -195,12 +199,16 @@ def check_plan_shaped(workdir):
     return False, "; ".join(reasons) or "plan files unreadable"
 
 
-def check_build(returncode, had_command):
-    """G5: build proof green. No build command is NOT BUILT (not a pass)."""
+def check_build(returncode, had_command, timeout_s=None):
+    """G5: build proof green. No build command is NOT BUILT (not a pass).
+
+    timeout_s is the effective DVC_BUILD_TIMEOUT, so the message names the
+    limit that actually applied (m2), not the shipped default.
+    """
     if not had_command:
         return False, "NOT BUILT: no --build command; nothing executed"
     if returncode == "timeout":
-        return False, (f"build timed out after {BUILD_TIMEOUT_S}s; "
+        return False, (f"build timed out after {timeout_s or BUILD_TIMEOUT_S}s; "
                        "killed so an unattended run cannot hang")
     if returncode == 0:
         return True, "build command exit 0"

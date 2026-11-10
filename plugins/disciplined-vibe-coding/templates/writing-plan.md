@@ -7,7 +7,7 @@ Purpose: atomic tasks one builder can run without asking anything else.
 ## Steps
 
 Purpose: each step names its file, output, and pass check.
-Full-spec+ only, when `plan` offers the ticket breakdown: `### T<n> <title>` then `blocked by: <T ids>|none` above that ticket's steps.
+Full-spec+ only, when `plan` offers the ticket breakdown: `### T<n> <title>` then `blocked by: <T ids>|none` above that ticket's steps. After publish, the card id goes on the heading: `### T2 <title> — card: t_ab12`.
 1. Path: / Content: / Expected output: / Pass check (observable):
 2. ...
 
