@@ -28,7 +28,8 @@ Nothing gets planned or built until the user has confirmed, in his own words, wh
 The rung sets the ceremony. One-liner: the chat line IS the intake —
 no interview, no to-spec block; record the rung sentence inline.
 Micro-spec: fast-path answers inline, 3-line micro-spec. Full-spec and
-above: full interview plus grill. Destructive data work always interviews,
+above: full interview, then hand the questions to `grill-with-docs` — it is
+the interview's teeth at that rung. Destructive data work always interviews,
 whatever the rung.
 
 ## Cognitive traps

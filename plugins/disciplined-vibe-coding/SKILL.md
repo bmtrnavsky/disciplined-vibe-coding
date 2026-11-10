@@ -82,7 +82,7 @@ artifact.
 | Stage | Skill | Artifact |
 |---|---|---|
 | 0. Intake (brainstorming capture) | `intake` | intake block atop the to-spec, or a one-liner in chat |
-| 1. Define (grill-with-docs → to-spec) | `intake`, `brainstorm`, `research` | `.pipeline/to-spec.md` (workdir; vault note only if durable) |
+| 1. Define (grill-with-docs → to-spec) | `grill-with-docs`, `intake`, `brainstorm`, `research` | `.pipeline/to-spec.md` (workdir; vault note only if durable) |
 | 2. Economy gate (scope rung) | this file, `references/economy-ladder.md` | one declared sentence in the to-spec |
 | 3. Plan (writing-plans format) | `plan` | `.pipeline/plans/NN-<milestone>.md`, or 3 bullets at micro-spec |
 | 3.5. Teardown (goldfish pre-build review; headless is post-build, §3.5a) | this file §3.5 | round notes in plan/to-spec + wayfinder pass/fail |
@@ -105,9 +105,11 @@ Interrogate the request against the relevant docs and skill references
 not open-ended questioning: check indexed sources, surface contradictions
 and missing decisions, record them in the spec.
 
-Cap: docs check plus at most 3 clarifying questions, then proceed with
-stated assumptions. Routine moves (obvious fix, single-file change) get a
-3-line micro-spec, not the full artifact.
+Cap: below full-spec the docs check plus at most 3 clarifying questions, then
+proceed with stated assumptions; at full-spec and above `grill-with-docs` sets
+the budget — 3 questions a round, 3 rounds a session, at most 9. Routine moves
+(obvious fix, single-file change) get a 3-line micro-spec, not the full
+artifact.
 Template: `templates/to-spec.md`.
 
 The elephant drafts here. The goldfish has not entered yet.

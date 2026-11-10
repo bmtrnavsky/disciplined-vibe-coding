@@ -11,6 +11,11 @@ Fix-A tests (T1/T2) replay REAL recorded model calls through the REAL
 Two mutation sentinels prove the suite can fail: disable the same-round
 rule or the goldfish's ability to object in a copy, and the suite FAILS.
 
+One exception to the no-string-matching rule: the grill's firing rules (D3)
+are prose in a skill file, so TestGrillSkillContract reads that file as text —
+the only machine-readable form a trigger list has. Everything else here runs
+the runner.
+
 Run:  python tests/dvc_behavioural.py
 """
 
@@ -77,7 +82,7 @@ def fresh_workdir():
 
 
 def run_job(work, build="", fresh=False, test_mode=True,
-            job="behavioural probe"):
+            job="behavioural probe", extra=()):
     """Drive the REAL runner; return (exit_code, stdout, report_text)."""
     argv = ["dvc_run", "--job", job, "--workdir", str(work)]
     if build:
@@ -86,6 +91,7 @@ def run_job(work, build="", fresh=False, test_mode=True,
         argv += ["--fresh"]
     if test_mode:
         argv += ["--test-mode"]
+    argv += list(extra)
     buf = io.StringIO()
     with redirect_stdout(buf), redirect_stderr(buf):
         code = dvc_run.main(argv[1:])
@@ -695,6 +701,120 @@ class TestG6DerivedFromTheRecord(unittest.TestCase):
                 self.assertFalse(dvc_run.cmd_verify(work, rec, "0" * 64, ()))
             g6 = [g for g in rec["gates"] if g["id"] == "G6"]
             self.assertEqual(g6[-1]["outcome"], "FAIL")
+
+
+GRILL_SKILL = ROOT / "skills" / "grill-with-docs" / "SKILL.md"
+OVERLAY = ROOT / "plugins" / "disciplined-vibe-coding" / "SKILL.md"
+GRILLED_SPEC = ("# To-spec (grilled)\n\nJob: {job}\n\n"
+                "rung: full-spec\n\n"
+                "## Decisions\n"
+                "- Decision: keep this marker / Why: the grill wrote it\n\n"
+                "GRILLED-OUTPUT-SURVIVES\n")
+
+
+class TestGrillSkillContract(unittest.TestCase):
+    """The grill fires on conditions (D1-D3), never on being asked.
+
+    A trigger list is prose, so it is checked as prose against the installed
+    skill — the file is the behavior a reading agent acts on.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.text = GRILL_SKILL.read_text(encoding="utf-8")
+        cls.low = cls.text.lower()
+
+    def test_fires_on_its_three_conditions(self):
+        for phrase in ("full-spec or above", "interactive session",
+                       "new domain term", "two ways"):
+            self.assertIn(phrase, self.low,
+                          f"auto-fire condition missing: {phrase}")
+
+    def test_do_not_fire_list_is_explicit(self):
+        for phrase in ("below full-spec", "headless", "kanban worker",
+                       "vocabulary is settled", "plan is already approved"):
+            self.assertIn(phrase, self.low,
+                          f"do-not-fire item missing: {phrase}")
+
+    def test_opt_in_language_is_gone(self):
+        for phrase in ("never automatic", "operator asks",
+                       "brad or the operator"):
+            self.assertNotIn(phrase, self.low)
+
+    def test_budget_is_three_by_three_and_the_overlay_agrees(self):
+        self.assertIn("3 questions a round, 3 rounds a session", self.low)
+        overlay = OVERLAY.read_text(encoding="utf-8").lower()
+        self.assertIn("3 questions a round, 3 rounds a session", overlay)
+
+    def test_intake_calls_the_grill_once(self):
+        intake = (ROOT / "skills" / "intake" / "SKILL.md").read_text(
+            encoding="utf-8")
+        self.assertEqual(intake.count("grill-with-docs"), 1)
+
+    def test_adr_rule_never_asks(self):
+        self.assertIn("never ask", self.low)
+        self.assertIn("no `docs/adr/` means the decision goes", self.low)
+
+    def test_headless_parks_needs_input_and_stops(self):
+        self.assertIn(".pipeline/grill/", self.text)
+        self.assertIn("kanban_block(kind=\"needs_input\")", self.text)
+        self.assertIn("do not proceed on assumptions", self.low)
+
+
+class TestGrilledSpecSurvivesDefine(unittest.TestCase):
+    """D6: a headless Define must not silently destroy the grill's spec."""
+
+    def seed(self, work, job):
+        (work / ".pipeline").mkdir(parents=True, exist_ok=True)
+        (work / ".pipeline" / "to-spec.md").write_text(
+            GRILLED_SPEC.format(job=job), encoding="utf-8")
+        grill = work / ".pipeline" / "grill"
+        grill.mkdir(parents=True, exist_ok=True)
+        (grill / "probe-round-1.md").write_text(
+            "# Round 1\n\n1. What does the term mean? (recommended: A)\n",
+            encoding="utf-8")
+
+    def test_seeded_grilled_marker_survives_a_headless_define(self):
+        with fresh_workdir() as work:
+            self.seed(work, "grill probe")
+            code, out, _ = run_job(work, job="grill probe")
+            spec = (work / ".pipeline" / "to-spec.md").read_text(
+                encoding="utf-8")
+            self.assertIn("GRILLED-OUTPUT-SURVIVES", spec)
+            self.assertIn("grilled spec loaded, not overwritten", out)
+            self.assertEqual(code, 2, out)  # past Define and the gates: NOT BUILT
+
+    def test_operator_flag_overwrites_and_logs_the_bypass(self):
+        with fresh_workdir() as work:
+            self.seed(work, "grill probe")
+            code, out, _ = run_job(work, job="grill probe",
+                                   extra=["--overwrite-grilled-spec"])
+            spec = (work / ".pipeline" / "to-spec.md").read_text(
+                encoding="utf-8")
+            self.assertNotIn("GRILLED-OUTPUT-SURVIVES", spec)
+            self.assertIn("BYPASS", out)
+            log = (work / ".pipeline" / "stages.jsonl").read_text(
+                encoding="utf-8")
+            self.assertIn('"result": "BYPASS"', log)
+            self.assertEqual(code, 2, out)
+
+    def test_round_file_newer_than_the_runner_stamp_protects_it(self):
+        """The real order: a headless Define ran, then the grill interviewed."""
+        with fresh_workdir() as work:
+            run_job(work, job="grill probe")  # Define stamps its own template
+            spec = work / ".pipeline" / "to-spec.md"
+            self.assertIn("generated-by: dvc_run.py",
+                          spec.read_text(encoding="utf-8"))
+            grill = work / ".pipeline" / "grill"
+            grill.mkdir(parents=True, exist_ok=True)
+            round_file = grill / "probe-round-1.md"
+            round_file.write_text("# Round 1\n", encoding="utf-8")
+            later = spec.stat().st_mtime + 5
+            os.utime(round_file, (later, later))
+            code, out, _ = run_job(work, job="grill probe", fresh=True)
+            self.assertIn("grilled spec loaded", out)
+            self.assertIn("generated-by: dvc_run.py", spec.read_text(
+                encoding="utf-8"))  # still the same file, not rewritten
 
 
 if __name__ == "__main__":

@@ -42,6 +42,12 @@ builder; G4, G5 and G7 grade work the run did not do. What no machine
 check can evaluate stays labelled ADVISORY in the Verify output (A1-A6),
 with the plain reason why.
 
+Grilled spec (D6): Define writes its micro template only when no grilled
+spec is on disk. A grill round file under `.pipeline/grill/` newer than the
+runner's own template stamp means the spec is the grill's output, so Define
+locks and loads it instead of overwriting. `--overwrite-grilled-spec` is the
+only override and it records a BYPASS in the stage log.
+
 Report (card 4/4): every exit — success, FAILED, or NOT BUILT — writes
 `.pipeline/run-report.md` via `dvc_report.py` and prints
 `report: <path>` as the last line, so Brad can find what happened
@@ -64,6 +70,7 @@ Usage:
 
 import argparse
 import os
+import re
 import subprocess
 import sys
 import time
@@ -75,8 +82,11 @@ import spec_lock  # noqa: E402  (stdlib-only sibling; hash/record logic reused)
 import dvc_gates  # noqa: E402  (automatic checks for every pipeline gate)
 import dvc_goldfish  # noqa: E402  (SDDA-shaped packet + one-shot review)
 import dvc_report  # noqa: E402  (end-of-run report Brad reads afterwards)
+import dvc_stage  # noqa: E402  (the stage log; an operator bypass is recorded there)
 
 DEFAULT_SPEC = ".pipeline/to-spec.md"
+GRILL_REL = ".pipeline/grill"
+SPEC_STAMP_RE = re.compile(r"^generated-by: dvc_run\.py (\d+)$", re.MULTILINE)
 
 
 def _slug(job):
@@ -95,17 +105,69 @@ def finish(workdir, rec, code):
     return code
 
 
-def cmd_define(workdir, job):
+def _newest_grill_round(workdir):
+    """Newest round file the grill left, or None. Its presence is the trace
+    that a grilled spec exists in this workdir."""
+    grill = workdir / GRILL_REL
+    if not grill.is_dir():
+        return None
+    rounds = sorted(grill.glob("*-round-*.md"), key=lambda p: p.stat().st_mtime)
+    return rounds[-1] if rounds else None
+
+
+def _is_grilled(spec, round_file):
+    """True when the spec on disk is grill output, not this runner's template.
+
+    D6: Define used to overwrite whatever sat at .pipeline/to-spec.md, which
+    deletes the interview's only artifact. Every template Define writes
+    carries its own epoch stamp; a round file newer than that stamp — or a
+    spec with no stamp at all — is the grill's work.
+    """
+    if round_file is None:
+        return False
+    try:
+        text = spec.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    stamp = SPEC_STAMP_RE.search(text)
+    if stamp is None:
+        return True
+    try:
+        return round_file.stat().st_mtime > int(stamp.group(1))
+    except OSError:
+        return False
+
+
+def cmd_define(workdir, job, overwrite_grilled=False):
     stage("Define")
     spec_rel = DEFAULT_SPEC
     spec = workdir / spec_rel
     spec.parent.mkdir(parents=True, exist_ok=True)
-    spec.write_text(
-        f"# To-spec (micro)\n\nJob: {job}\n\n"
-        "rung: micro-spec, reversible single-file change inside the workdir.\n"
-        "Assumptions: defaults taken, no questions asked (autonomous run).\n",
-        encoding="utf-8",
-    )
+    round_file = _newest_grill_round(workdir)
+    grilled = spec.is_file() and _is_grilled(spec, round_file)
+    if grilled and not overwrite_grilled:
+        # The grilled spec is loaded and locked, not replaced: the gates then
+        # grade it as the run's spec (a job it does not record still fails G1).
+        where = (f" ({round_file.relative_to(workdir).as_posix()})"
+                 if round_file else "")
+        print(f"spec: grilled spec loaded, not overwritten{where}; "
+              "pass --overwrite-grilled-spec to replace it", flush=True)
+    else:
+        if grilled:
+            # The flag is the only way in, and the bypass is logged (an
+            # unlogged bypass is a pipeline defect).
+            dvc_stage.log(workdir, "Define", "G1", "BYPASS",
+                          "operator flag replaced a grilled spec",
+                          by="operator", why="--overwrite-grilled-spec")
+            print("spec: BYPASS — operator flag replaced a grilled spec; "
+                  "logged in .pipeline/stages.jsonl", flush=True)
+        spec.write_text(
+            f"# To-spec (micro)\n\nJob: {job}\n\n"
+            "rung: micro-spec, reversible single-file change inside the workdir.\n"
+            "Assumptions: defaults taken, no questions asked (autonomous run).\n"
+            f"generated-by: dvc_run.py {int(time.time())}\n",
+            encoding="utf-8",
+        )
     rc = spec_lock.cmd_lock(str(workdir), spec_rel)
     if rc != 0:
         print("Define FAILED: could not hash spec; stopping.", flush=True)
@@ -356,6 +418,9 @@ def main(argv=None):
     ap.add_argument("--fresh", action="store_true",
                     help="start a new run even over a FAILED one; "
                          "the new run cites it in the history")
+    ap.add_argument("--overwrite-grilled-spec", action="store_true",
+                    help="replace a grilled .pipeline/to-spec.md with the "
+                         "runner's micro template; the bypass is logged")
     ap.add_argument("--test-mode", action="store_true",
                     help="allow the canned-verdict reviewer stub "
                          "(needs DVC_TEST_MODE=1 too); every stubbed "
@@ -391,7 +456,7 @@ def main(argv=None):
 
 
 def _run(ns, workdir, rec, t0):
-    locked_hash = cmd_define(workdir, ns.job)
+    locked_hash = cmd_define(workdir, ns.job, ns.overwrite_grilled_spec)
     if locked_hash is None:
         rec["stop"] = {"result": "FAILED",
                        "sentence": "The run failed at Define: the spec "
