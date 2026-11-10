@@ -19,6 +19,7 @@ A plan is atomic tasks scoped to ONE milestone.
 7. **Reuse list FIRST** with one-line justifications for new code.
 8. **Decision log** in header (forks/who/why). **Status footer** (done/next/open).
 9. **STE style** per `write-docs`. DRAFT until approved.
+10. **Optional: `to-tickets` breakdown (offer, never automatic).** Full-spec and above, approved plan, interactive session, and big enough to need the split (8+ steps, 2+ workers, or multi-session): offer it here — ticket groups plus one `blocked by:` line each, inside this plan file — before teardown. Headless: write the DRAFT under `.pipeline/tickets/` and stop; never publish.
 
 ## Payments rule (hard)
 Provider-hosted checkout only. A plan storing/processing raw card data is malformed, full stop.

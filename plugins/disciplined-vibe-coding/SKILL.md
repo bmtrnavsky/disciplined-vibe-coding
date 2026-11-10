@@ -120,6 +120,7 @@ Full format at full-spec rung and above (`templates/writing-plan.md`):
 steps, files touched, test strategy, verify criteria, commit message draft.
 At micro-spec rung it collapses to 3 bullets. Never freeform
 "I'll figure it out as I go."
+Optional at full-spec rung and above, interactive only, never automatic: `to-tickets` cuts an approved plan into tickets with explicit `blocked by:` edges inside this plan file.
 
 ## 3.5. Teardown — goldfish review before code counts
 
