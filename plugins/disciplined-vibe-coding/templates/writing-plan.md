@@ -1,5 +1,7 @@
 # Plan — [milestone name]
 
+Status: DRAFT
+
 Purpose: atomic tasks one builder can run without asking anything else.
 
 ## Steps
@@ -25,7 +27,8 @@ Purpose: the exact re-runnable checks `verify` will run.
 
 ## Rollback
 
-Purpose: how to undo this plan if it goes wrong. Skip only if fully reversible.
+Purpose: how to undo this plan if it goes wrong. The heading always stays: write
+one line saying why it is fully reversible when that is true.
 -
 
 ## Commit message draft

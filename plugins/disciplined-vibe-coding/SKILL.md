@@ -61,6 +61,12 @@ rejects links escaping it, and history lives outside the workdir,
 hash-chained. Fix G hardens the runner: builds get a minimal env, the
 reviewer stub needs `--test-mode` and is marked STUB everywhere.
 
+G1-G3 are **self-checks** in the autonomous runner: the runner writes the spec
+and the plan they grade, so they stop a malformed run but no builder can turn
+them red. G4, G5 and G7 grade work the run did not do. In an interactive
+session the same shapes are checked by the builder, where a human writes the
+artifact.
+
 ## Stage map (pipeline stage → skill that owns it)
 
 | Stage | Skill | Artifact |
@@ -120,7 +126,7 @@ Full format at full-spec rung and above (`templates/writing-plan.md`):
 steps, files touched, test strategy, verify criteria, commit message draft.
 At micro-spec rung it collapses to 3 bullets. Never freeform
 "I'll figure it out as I go."
-Optional at full-spec rung and above, interactive only, never automatic: `to-tickets` cuts an approved plan into tickets with explicit `blocked by:` edges inside this plan file.
+`to-tickets` fires on its conditions, not on request: at full-spec rung and above, with an approved plan, when the work needs the split (8+ steps, 2+ workers, or multi-session), it cuts ticket groups with explicit `blocked by:` edges inside this plan file. Draft before teardown; publish only after teardown passes and the quiz is approved — the quiz stays mandatory because publishing dispatches workers. Headless runs draft under `.pipeline/tickets/` and stop. Do not fire below full-spec, on a plan already ticketed, or to publish from a headless run.
 
 ## 3.5. Teardown — goldfish review before code counts
 

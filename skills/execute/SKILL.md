@@ -13,6 +13,14 @@ Workers write assigned files only. The orchestrator alone touches git, plans, st
 1. **Direct execute** small/single-file tasks.
 2. **Workers (max 5)** for independent mechanical/long items: briefs carry requirements, constraints, decision-log lines, acceptance criteria. Workers: assigned files only; no git; no plan edits; no gates; no sub-workers. Shared files serialize.
 3. **Merge + review** each worker diff vs acceptance criteria, THEN commit (per `version`).
+
+**Frontier — parallel workers from the plan's `blocked by:` lines.**
+Read the ticket groups in the plan file: a ticket is on the frontier when every
+ticket in its `blocked by:` line is done. Derive it at each dispatch and never
+store it. For published cards the board's `parents=` is the same frontier, and
+Kanban enforces that half; inside a run these lines are the only frontier there
+is, so read them instead of guessing independence from prose.
+
 4. **Checkpoint report** plainly: built/where/what passed/what owes. Offer continue/adjust/stop. Wait on structural.
 5. **Long-running tasks** (training, bulk jobs): start them, report the job id/log path, and DON'T block the checkpoint loop — queue completion review as a task with its metric band from the budget line.
 6. **Session close:** status footer update + commit + one-sentence stopping point.

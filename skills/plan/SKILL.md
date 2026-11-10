@@ -18,8 +18,8 @@ A plan is atomic tasks scoped to ONE milestone.
 6. **Rollback line + dry-run task** for destructive steps. MONEY-tier systems: the dry run IS paper-trading — live action is a separate, later milestone.
 7. **Reuse list FIRST** with one-line justifications for new code.
 8. **Decision log** in header (forks/who/why). **Status footer** (done/next/open).
-9. **STE style** per `write-docs`. DRAFT until approved.
-10. **Optional: `to-tickets` breakdown (offer, never automatic).** Full-spec and above, approved plan, interactive session, and big enough to need the split (8+ steps, 2+ workers, or multi-session): offer it here — ticket groups plus one `blocked by:` line each, inside this plan file — before teardown. Headless: write the DRAFT under `.pipeline/tickets/` and stop; never publish.
+9. **STE style** per `write-docs`. DRAFT until approved; any edit after approval re-stamps DRAFT until re-approved.
+10. **`to-tickets` fires on its conditions, not on request.** At full-spec and above, with an approved plan, when the work needs the split (8+ steps, 2+ workers, or multi-session): cut ticket groups plus one `blocked by:` line each into THIS plan file — ticket groups and edges live here, this file is the one artifact, and the orchestrator owns it. Do not fire below full-spec, on a plan already ticketed, or to publish from a headless run (it drafts, then stops). Order: draft the ticket groups into the plan before teardown; publish only after teardown passes AND the user approves the cut (quiz before publish). Headless: write the DRAFT under `.pipeline/tickets/` and stop — never publish.
 
 ## Payments rule (hard)
 Provider-hosted checkout only. A plan storing/processing raw card data is malformed, full stop.

@@ -7,12 +7,17 @@ be evaluated automatically. No gate is left as prose pretending to enforce.
 
 Gate table (id, what it means, status, check):
 
-  G1 define/spec-locked      to-spec exists and was hashed at Define
-      AUTO: .pipeline/to-spec.md exists AND .pipeline/spec.lock exists
-  G2 economy/rung-declared   one rung sentence in the to-spec
-      AUTO: a "rung:" line is present in the to-spec
-  G3 plan/shaped             plan file exists in fixed shape
-      AUTO: .pipeline/plans/*.md exists with >= 3 non-empty lines
+  G1 define/spec-locked      the --job input is recorded in a locked spec
+      AUTO: --job is non-empty, .pipeline/to-spec.md carries that exact
+      job on its "Job:" line, and .pipeline/spec.lock still hashes the
+      spec. Grades Define's INPUT: a hollow or swapped spec fails here.
+  G2 economy/rung-declared   the declared rung names a real ladder rung
+      AUTO: a "rung:" line naming one-liner, micro-spec, full-spec or
+      project (see references/economy-ladder.md). A junk value fails.
+  G3 plan/shaped             a plan file, not a list of lines
+      AUTO: .pipeline/plans/*.md in the writing-plan shape (Steps /
+      Files touched / Verify / Rollback headings) or the ladder's micro
+      shape ("# Plan ... micro"). A ticket file or junk fails here.
   G4 teardown/goldfish-pass  blind review raised no standing objection
       AUTO: dvc_goldfish.run_loop outcome is PASS (card 2 stop rules)
   G5 build/proof-green       the build proof passed
@@ -30,6 +35,12 @@ Gate table (id, what it means, status, check):
       "do nothing" no longer reads as SUCCEEDED. Fix E: a declaration
       added during the Build window fails too — the builder cannot
       declare its own drift.)
+
+G1-G3 are SELF-CHECKS in the autonomous runner: `cmd_define` and
+`cmd_plan` write the artifacts they grade, so a wrong shape stops the run
+but no builder can turn them red. They grade the run's inputs (the job
+line) and the artifact shapes. G4, G5 and G7 are the gates that grade work
+the run did not do.
 
 Advisory (evaluated by no machine check; labelled ADVISORY in run output):
 
@@ -87,41 +98,101 @@ ADVISORIES = (
 )
 
 
-def check_spec_locked(workdir):
-    """G1: spec file present and lock record present."""
+RUNG_NAMES = ("one-liner", "micro-spec", "full-spec", "project")
+
+# The plan shapes writing-plan.md and the economy ladder allow. A ticket
+# list, a spec, or junk matches neither (C3).
+PLAN_SECTIONS = ("steps", "files touched", "verify", "rollback")
+
+
+def check_spec_locked(workdir, job):
+    """G1: the --job input is recorded in a spec the lock still covers.
+
+    Grades Define's input, not just the file the runner wrote (C1): the
+    spec must carry the very job the operator passed, and the lock must
+    still hash the spec on disk. A hollow or swapped spec fails here.
+    """
     workdir = Path(workdir)
-    if not (workdir / SPEC_REL).is_file():
+    if not (job or "").strip():
+        return False, "no job input: --job was empty"
+    spec = workdir / SPEC_REL
+    if not spec.is_file():
         return False, f"{SPEC_REL} missing"
     if not (workdir / LOCK_REL).is_file():
         return False, f"{LOCK_REL} missing (spec never locked at Define)"
-    return True, "spec present and lock recorded"
+    try:
+        text = spec.read_text(encoding="utf-8")
+    except OSError as exc:
+        return False, f"spec unreadable ({exc})"
+    if f"Job: {job}" not in text:
+        return False, "spec does not record the --job input (swapped or hollow spec)"
+    try:
+        from spec_lock import sha256_file, read_lock, lock_path_for
+        if read_lock(lock_path_for(workdir)).get("sha256") != sha256_file(spec):
+            return False, "spec no longer matches its Define lock"
+    except (ImportError, OSError, ValueError) as exc:
+        return False, f"spec lock unreadable ({exc})"
+    return True, "job recorded in the spec and the lock still hashes it"
 
 
 def check_rung_declared(workdir):
-    """G2: one rung sentence in the to-spec."""
+    """G2: the declared rung names a real rung on the ladder.
+
+    In dvc_run the runner writes this sentence itself, so the check grades
+    the declaration's form, never a human's choice (C2). A junk value
+    ("rung: probe") fails; an absent line fails.
+    """
     try:
         text = (Path(workdir) / SPEC_REL).read_text(encoding="utf-8")
     except OSError as exc:
         return False, f"spec unreadable ({exc})"
-    if re.search(r"^rung\s*:", text, re.MULTILINE | re.IGNORECASE):
-        return True, "rung sentence declared in to-spec"
-    return False, 'no "rung:" sentence in to-spec'
+    match = re.search(r"^rung\s*:\s*([a-z][a-z-]*)", text,
+                      re.MULTILINE | re.IGNORECASE)
+    if not match:
+        return False, 'no "rung:" sentence in to-spec'
+    rung = match.group(1).lower()
+    if rung not in RUNG_NAMES:
+        return False, (f'rung "{rung}" is not on the ladder '
+                       f"({', '.join(RUNG_NAMES)})")
+    return True, f"rung declared: {rung}"
+
+
+def _plan_shape(text):
+    """(ok, why) for the two shapes the docs allow. See PLAN_SECTIONS."""
+    heads = [ln.lstrip("#").strip().lower()
+             for ln in text.splitlines() if ln.lstrip().startswith("#")]
+    have = {s for s in PLAN_SECTIONS
+            if any(h.startswith(s) for h in heads)}
+    if have == set(PLAN_SECTIONS):
+        return True, "full plan shape (Steps/Files touched/Verify/Rollback)"
+    if any(h.startswith("plan") and "micro" in h for h in heads):
+        return True, "micro plan shape (# Plan ... micro)"
+    missing = ", ".join(s for s in PLAN_SECTIONS if s not in have)
+    return False, f"not a plan: no shape headings ({missing}) and no micro plan heading"
 
 
 def check_plan_shaped(workdir):
-    """G3: a plan file exists with at least 3 non-empty lines."""
+    """G3: a plan file in the fixed shape, not a list of non-empty lines.
+
+    A ticket list, a copied spec, or junk written into .pipeline/plans/
+    does not satisfy "a plan exists" (C3). In dvc_run the runner writes
+    the plan, so this is a self-check on its artifact shape; a builder's
+    plan meets the same bar.
+    """
     plans = sorted((Path(workdir) / PLANS_REL).glob("*.md"))
     if not plans:
         return False, f"no plan file in {PLANS_REL}/"
+    reasons = []
     for plan in plans:
         try:
-            lines = [ln for ln in plan.read_text(encoding="utf-8").splitlines()
-                     if ln.strip()]
+            text = plan.read_text(encoding="utf-8")
         except OSError:
             continue
-        if len(lines) >= 3:
-            return True, f"{plan.name}: {len(lines)} non-empty lines"
-    return False, "plan file exists but has fewer than 3 non-empty lines"
+        ok, why = _plan_shape(text)
+        if ok:
+            return True, f"{plan.name}: {why}"
+        reasons.append(f"{plan.name}: {why}")
+    return False, "; ".join(reasons) or "plan files unreadable"
 
 
 def check_build(returncode, had_command):

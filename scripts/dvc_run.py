@@ -31,8 +31,12 @@ Gates (card 3): every gate the pipeline claims is evaluated by the run
 itself via `dvc_gates.py` — G1 spec-locked, G2 rung-declared, G3
 plan-shaped, G4 goldfish-pass, G5 proof-green, G6 done-claim-mapped,
 G7 spec-stable (fix B). A failed gate stops the run and names the
-gate. What no machine check can evaluate stays labelled ADVISORY in
-the Verify output (A1-A6), with the plain reason why.
+gate. G1-G3 grade artifacts this runner writes itself, so here they are
+SELF-CHECKS: G1 grades the --job input against the locked spec, G2 the
+declared rung's form, G3 the plan's shape. None can be turned red by a
+builder; G4, G5 and G7 grade work the run did not do. What no machine
+check can evaluate stays labelled ADVISORY in the Verify output (A1-A6),
+with the plain reason why.
 
 Report (card 4/4): every exit — success, FAILED, or NOT BUILT — writes
 `.pipeline/run-report.md` via `dvc_report.py` and prints
@@ -383,7 +387,7 @@ def _run(ns, workdir, rec, t0):
     run_id = dvc_goldfish.make_run_id()
     rec["run_id"] = run_id
     print(f"run: {run_id}", flush=True)
-    ok, why = dvc_gates.check_spec_locked(workdir)
+    ok, why = dvc_gates.check_spec_locked(workdir, ns.job)
     if not gate_or_stop(workdir, rec, "G1", "define/spec-locked",
                         ok, why, "Plan"):
         rec["stop"] = {"result": "FAILED",

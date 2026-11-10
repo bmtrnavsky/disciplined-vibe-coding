@@ -1,6 +1,6 @@
 ---
 name: to-tickets
-description: Use at full-spec rung and above, after a milestone plan is approved, to cut it into tickets with explicit blocked-by edges and publish them as Kanban cards. Opt-in; the plain plan-then-execute path stays the default.
+description: Use at full-spec rung and above when an approved plan needs splitting into tickets with explicit blocked-by edges, published as Kanban cards. Fires on conditions; quiz before publish.
 phase: Plan
 ---
 
@@ -13,16 +13,22 @@ sitting. Hand out promises, not maps.
 
 ## When this fires
 
-All four must be true. If any is false, do not fire — plan and execute are
-already enough:
+It fires on its conditions, with no asking. There are two gates, because
+drafting is free and publishing dispatches workers (spend):
 
+**May draft when all hold:**
 1. The rung is full-spec or above.
 2. A milestone plan exists and is **approved**.
 3. The work is big enough to need the split: 8 or more plan steps, or 2 or more
    workers, or work that will not finish in this session.
-4. You are in an interactive session, so you can ask before publishing.
 
-Never fire automatically after `plan`. Brad (or the operator) asks for tickets.
+**May publish when all hold:**
+1. The draft exists and the quiz (§5) is approved by the user.
+2. Teardown has passed on the plan that carries the ticket groups.
+
+Do not fire when: the rung is below full-spec; the plan is already ticketed
+(its ticket groups exist); or the next move would be publishing from a headless
+run — headless runs draft under `.pipeline/tickets/` and stop.
 
 ## Steps, in order
 
@@ -32,11 +38,16 @@ Read the whole plan file, its to-spec, and the files-touched list. The plan is
 the only source of truth for scope: if the plan does not say it, it is not a
 ticket.
 
-Refuse and say why if: no plan exists, the plan is still DRAFT, or teardown has
-not passed. Tickets cut from an unreviewed plan multiply an unexamined idea.
+Refuse and say why if: no plan exists, or the plan is still DRAFT. Tickets cut
+from an unapproved plan multiply an unexamined idea. Teardown gates publishing,
+not drafting: cut into the plan before teardown so the reviewer sees the cut,
+and publish only once teardown has passed.
 
-You may read code to understand the plan. You may not change it. Nothing is
-built in this skill.
+You may read code to understand the plan. You may not change code. Your one
+write is this skill's cut into the plan file — ticket groups, their `blocked by:`
+lines, and nothing else — because the plan file is the one artifact. The
+orchestrator owns that file: when you edit an approved plan, re-stamp its status
+`DRAFT`; the quiz re-approves it.
 
 ### 2. Cut the plan into tickets
 
@@ -110,7 +121,8 @@ what is unresolved: size questions are usually a scope question in disguise.
 
 ### 6. Publish to the board
 
-Publish only after approval, and only as cards:
+Publish only after the quiz is approved AND teardown has passed, and only as
+cards:
 
 - One card per ticket. Never one card holding a list.
 - `parents=[...]` carries the blocking edges. The board already promotes a child
@@ -132,7 +144,8 @@ than a pause.
 
 State which tickets are on the frontier right now, and which are waiting. From
 here `execute` owns the build and the books: the orchestrator alone touches git,
-plan files, statuses, and gates. This skill does not track the work it published.
+statuses, and gates, and owns the plan file beyond this skill's single cut. This
+skill does not track the work it published.
 
 ## The card body
 
@@ -172,12 +185,15 @@ makes rollback a revert and makes cross-session resume a named thing.
 
 ## What this skill never does
 
-- Never writes code, tests, or plan edits.
-- Never publishes without approval, and never publishes from a headless run —
-  it writes a DRAFT under `.pipeline/tickets/` and stops.
+- Never writes code or tests. Its one write is the ticket cut into the plan
+  file: ticket groups, `blocked by:` lines, and the DRAFT re-stamp they require.
+- Never publishes without approval, never publishes after a failed teardown, and
+  never publishes from a headless run — it writes a DRAFT under
+  `.pipeline/tickets/` and stops.
 - Never writes card status, closes a parent, or touches git.
-- Never puts ticket files in `.pipeline/plans/` — that directory is what proves
-  a plan was shaped, and a stray file there can satisfy the check.
+- Never puts ticket FILES in `.pipeline/plans/` — a stray file there can satisfy
+  the plan-shape check. Ticket groups live inside the plan file, never as a new
+  file in that directory.
 - Never invents scope the plan does not contain. Discoveries go back to the plan.
 
 ## Done when
@@ -186,7 +202,7 @@ makes rollback a revert and makes cross-session resume a named thing.
   verify command, and a rollback line.
 - The user approved size and edges.
 - Cards exist, each with a parent set and an assignee, and the frontier was named.
-- Nothing outside the board and `.pipeline/tickets/` was written.
+- Nothing outside the plan file, the board and `.pipeline/tickets/` was written.
 
 ## Cognitive traps
 
