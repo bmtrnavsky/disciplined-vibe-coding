@@ -2,7 +2,7 @@
 name: disciplined-vibe-coding
 description: Run any coding task through Intake, Define, Economy gate, Plan, Teardown, Build, Verify, Commit — with Wayfinder tracking riding along. Use at the start of any build, fix, or multi-session project.
 phase: Any
-version: 0.3.1
+version: 0.3.2
 ---
 
 # Disciplined vibe-coding pipeline — end to end

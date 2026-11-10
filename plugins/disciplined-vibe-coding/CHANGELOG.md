@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.3.2 - 2026-11-10
+
+Define gets an interview with teeth. Covered by `tests/dvc_behavioural.py`
+(45/45); `scripts/selfcheck.sh` passes 56/56 but is lint only and proves
+nothing on its own.
+
+- Added (cfcbc13): `grill-with-docs` — a bounded interview that settles the
+  vocabulary before a spec is written. It fires on three conditions (full-spec
+  or above, an interactive session, unsettled vocabulary) without asking, and
+  refuses on four (below full-spec, headless or Kanban, vocabulary settled,
+  plan already approved). Each round lands under `.pipeline/grill/`; the cap
+  is 3 questions a round, 3 rounds a session, 9 total.
+- Changed (cfcbc13): at full-spec and above `intake` hands its questions to
+  `grill-with-docs` — it is the interview's teeth at that rung — and the
+  pipeline SKILL lists it as a Define skill and defers the Define budget to it.
+- Fixed (cfcbc13): D6 — Define no longer overwrites a grilled spec. It loads
+  and locks the grill's output instead, and `--overwrite-grilled-spec` is the
+  only override, recording a BYPASS in `.pipeline/stages.jsonl`.
+
 ## 0.3.1 - 2026-11-10
 
 Ticket-splitting lands as an opt-in skill, plus two Opus review rounds that
