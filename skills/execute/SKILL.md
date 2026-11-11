@@ -12,7 +12,10 @@ Workers write assigned files only. The orchestrator alone touches git, plans, st
 ## Steps (in order)
 1. **Gate before Build, not after:** run `python scripts/dvc_stage.py check
    --before Build`. Exit 1 means a stage is unlogged or a gate is red — stop
-   and fix it; the log line at each stage exit is `dvc_stage.py log --stage
+   and fix it. Fixing it means logging a new PASS for the same gate. Rework may
+   step back to an earlier stage only right after a FAIL, and any Build after a
+   new Define/Economy/Plan record needs a fresh Teardown pass. The log line at
+   each stage exit is `dvc_stage.py log --stage
    <stage> --gate <id> --result PASS|FAIL --reason "..."`.
 2. **Direct execute** small/single-file tasks.
 3. **Workers (max 5)** for independent mechanical/long items: briefs carry requirements, constraints, decision-log lines, acceptance criteria. Workers: assigned files only; no git; no plan edits; no gates; no sub-workers. Shared files serialize.

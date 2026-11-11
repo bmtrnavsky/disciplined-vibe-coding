@@ -9,8 +9,9 @@ Gate table (id, what it means, status, check):
 
   G1 define/spec-locked      the --job input is recorded in a locked spec
       AUTO: --job is non-empty, .pipeline/to-spec.md carries that exact
-      job on its "Job:" line, and .pipeline/spec.lock still hashes the
-      spec. Grades Define's INPUT: a hollow or swapped spec fails here.
+      job (whitespace-normalised) on its first "Job:" line, and
+      .pipeline/spec.lock still hashes the spec. Grades Define's INPUT: a
+      hollow or swapped spec fails here.
   G2 economy/rung-declared   the declared rung names a real ladder rung
       AUTO: a "rung:" line naming one-liner, micro-spec, full-spec or
       project (see references/economy-ladder.md). A junk value fails.
@@ -39,6 +40,12 @@ Gate table (id, what it means, status, check):
       "do nothing" no longer reads as SUCCEEDED. Fix E: a declaration
       added during the Build window fails too — the builder cannot
       declare its own drift.)
+
+Runner scope (not a gate): `check_runner_rung` compares the declared rung
+to the runner's ceiling, one-liner and micro-spec. A spec above it stops
+the run as OUT OF SCOPE (exit 5) before any gate, plan or build runs. It
+is a run result with its own exit code, not a gate, so the gate list
+above stays exhaustive.
 
 G1-G3 are SELF-CHECKS in the autonomous runner: `cmd_define` and
 `cmd_plan` write the artifacts they grade, so a wrong shape stops the run
@@ -104,6 +111,22 @@ ADVISORIES = (
 
 RUNG_NAMES = ("one-liner", "micro-spec", "full-spec", "project")
 
+# What dvc_run can honor: it writes a micro plan and runs only a
+# post-build review, so a spec above this stops OUT OF SCOPE (exit 5).
+RUNNER_RUNGS = ("one-liner", "micro-spec")
+
+RUNG_RE = re.compile(r"^rung\s*:\s*([a-z][a-z-]*)",
+                     re.MULTILINE | re.IGNORECASE)
+# G1 matches the line, never a substring: "Job: abcd" must not pass --job ab.
+JOB_LINE_RE = re.compile(r"^Job:[ \t]*(.*?)[ \t]*$", re.MULTILINE)
+
+
+def read_rung(text):
+    """The first declared rung name, lower-cased; None when absent."""
+    match = RUNG_RE.search(text or "")
+    return match.group(1).lower() if match else None
+
+
 # The plan shapes writing-plan.md and the economy ladder allow. A ticket
 # list, a spec, or junk matches neither (C3).
 PLAN_SECTIONS = ("steps", "files touched", "verify", "rollback")
@@ -128,8 +151,19 @@ def check_spec_locked(workdir, job):
         text = spec.read_text(encoding="utf-8")
     except OSError as exc:
         return False, f"spec unreadable ({exc})"
-    if f"Job: {job}" not in text:
-        return False, "spec does not record the --job input (swapped or hollow spec)"
+    def norm(s):
+        return " ".join(s.split())
+
+    match = JOB_LINE_RE.search(text)
+    if not match or not match.group(1).strip():
+        return False, ('spec has no "Job:" line, so the --job input is not '
+                       "recorded in it; a spec written from "
+                       "templates/to-spec.md needs \"Job: <the exact --job "
+                       'text>" under its title')
+    if norm(match.group(1)) != norm(job):
+        return False, (f"spec Job line {match.group(1)!r} differs from "
+                       f"--job {norm(job)!r} (swapped spec, or the wrong "
+                       "--job)")
     try:
         from spec_lock import sha256_file, read_lock, lock_path_for
         if read_lock(lock_path_for(workdir)).get("sha256") != sha256_file(spec):
@@ -150,15 +184,36 @@ def check_rung_declared(workdir):
         text = (Path(workdir) / SPEC_REL).read_text(encoding="utf-8")
     except OSError as exc:
         return False, f"spec unreadable ({exc})"
-    match = re.search(r"^rung\s*:\s*([a-z][a-z-]*)", text,
-                      re.MULTILINE | re.IGNORECASE)
-    if not match:
+    rung = read_rung(text)
+    if rung is None:
         return False, 'no "rung:" sentence in to-spec'
-    rung = match.group(1).lower()
     if rung not in RUNG_NAMES:
         return False, (f'rung "{rung}" is not on the ladder '
                        f"({', '.join(RUNG_NAMES)})")
     return True, f"rung declared: {rung}"
+
+
+def check_runner_rung(workdir):
+    """Not a gate: is the declared rung within what dvc_run can honor?
+
+    The runner writes a micro plan and runs only a post-build review, so
+    a full-spec or project spec would get micro ceremony. Above the
+    ceiling, `_run` stops with OUT OF SCOPE (exit 5) before any gate,
+    plan or build. Junk and unreadable specs pass here: G2 names them.
+    """
+    try:
+        text = (Path(workdir) / SPEC_REL).read_text(encoding="utf-8")
+    except OSError:
+        return True, "rung not graded here; G2 grades it"
+    rung = read_rung(text)
+    if rung not in RUNG_NAMES:
+        return True, "rung not graded here; G2 grades it"
+    if rung in RUNNER_RUNGS:
+        return True, f"rung {rung} is within the runner's ceiling"
+    return False, (f"rung {rung} is above the runner's ceiling (micro-spec): "
+                   "dvc_run writes a micro plan and runs only a post-build "
+                   f"review; a {rung} spec needs the interactive pipeline "
+                   "(full plan, five-round pre-build teardown, plan approval)")
 
 
 def _plan_shape(text):

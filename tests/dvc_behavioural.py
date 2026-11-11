@@ -394,6 +394,71 @@ class TestGates(unittest.TestCase):
             self.assertIn("Result: FAILED", text)
 
 
+class TestG1JobLine(unittest.TestCase):
+    """N1: G1 parses the Job line, and the ceiling stops full-spec first."""
+
+    def test_template_shaped_grilled_spec_stops_out_of_scope_not_g1(self):
+        """A spec straight from templates/to-spec.md stops at the ceiling."""
+        tpl = (ROOT / "plugins" / "disciplined-vibe-coding" / "templates"
+               / "to-spec.md").read_text(encoding="utf-8")
+        lines = []
+        for ln in tpl.splitlines():
+            if ln.startswith("# To-spec"):
+                lines += [ln, "", "grilled-by: grill-with-docs"]
+            elif ln.strip() == "Rung:":
+                lines.append("Rung: full-spec")
+            else:
+                lines.append(ln)
+        spec_text = "\n".join(lines) + "\n"
+        self.assertNotIn("\nJob:", spec_text)  # the template has no Job line
+        with fresh_workdir() as work:
+            spec = work / ".pipeline" / "to-spec.md"
+            spec.parent.mkdir(parents=True, exist_ok=True)
+            spec.write_text(spec_text, encoding="utf-8")
+            before = spec.read_bytes()
+            code, out, _ = run_job(work)
+            self.assertEqual(code, 5, out)
+            self.assertNotIn("swapped or hollow", out)
+            self.assertEqual(spec.read_bytes(), before)
+
+    def test_missing_job_line_names_itself(self):
+        """No Job line: the reason says so, not 'swapped or hollow'."""
+        with fresh_workdir() as work:
+            spec = work / ".pipeline" / "to-spec.md"
+            spec.parent.mkdir(parents=True, exist_ok=True)
+            spec.write_text("# To-spec\n\nrung: micro-spec\n", encoding="utf-8")
+            self.assertEqual(
+                spec_lock.cmd_lock(str(work), ".pipeline/to-spec.md"), 0)
+            ok, why = dvc_gates.check_spec_locked(work, "probe")
+            self.assertFalse(ok)
+            self.assertIn('no "Job:" line', why)
+
+    def test_prefix_job_no_longer_passes(self):
+        """The old substring hole: 'Job: abcd' must not pass --job ab."""
+        with fresh_workdir() as work:
+            spec = work / ".pipeline" / "to-spec.md"
+            spec.parent.mkdir(parents=True, exist_ok=True)
+            spec.write_text("# To-spec\n\nJob: abcd\n\nrung: micro-spec\n",
+                            encoding="utf-8")
+            self.assertEqual(
+                spec_lock.cmd_lock(str(work), ".pipeline/to-spec.md"), 0)
+            ok, why = dvc_gates.check_spec_locked(work, "ab")
+            self.assertFalse(ok)
+            self.assertIn("differs from --job", why)
+
+    def test_multiline_job_is_written_as_one_line(self):
+        """A --job with a newline cannot inject a second `rung:` line."""
+        with fresh_workdir() as work:
+            code, out, _ = run_job(work, job="a\nrung: project")
+            spec = (work / ".pipeline" / "to-spec.md").read_text(
+                encoding="utf-8")
+            rungs = [ln for ln in spec.splitlines()
+                     if ln.lower().startswith("rung:")]
+            self.assertEqual(len(rungs), 1, spec)
+            self.assertIn("micro-spec", rungs[0])
+            self.assertNotEqual(code, 5, out)
+
+
 class TestFixAReviewer(unittest.TestCase):
     def test_vague_artifact_is_objected_to(self):
         """Recorded real call: evasive text earns FAIL on both rounds."""
@@ -655,6 +720,85 @@ class TestStageGateLog(unittest.TestCase):
             self.assertTrue(ok, why)
 
 
+class TestStageLoops(unittest.TestCase):
+    """N2: the stage log is a sequence of loops, and rework inside a loop is
+    a legal step back only right after a FAIL."""
+
+    FULL = (("Define",), ("Economy",), ("Plan",), ("Teardown",),
+            ("Build",), ("Verify",))
+    REWORK = (("Define",), ("Economy",), ("Plan", "G3", "FAIL"),
+              ("Plan", "G3", "PASS"), ("Teardown",), ("Build",), ("Verify",))
+    REWIND = (("Define",), ("Economy",), ("Plan",), ("Teardown",),
+              ("Build",), ("Plan",), ("Teardown",), ("Build",), ("Verify",))
+
+    def _check(self, work, rows, before=None):
+        write_stage_log(work, *(stage_record(*row) for row in rows))
+        return dvc_stage.check(work, before)
+
+    def test_fail_then_pass_clears(self):
+        """P1: a fix is a new PASS for the same gate, no bypass needed."""
+        with fresh_workdir() as work:
+            ok, why = self._check(work, self.REWORK)
+            self.assertTrue(ok, why)
+
+    def test_teardown_rework_loop(self):
+        """P3: failing Teardown, replanning and re-passing is a legal loop."""
+        rows = (("Define",), ("Economy",), ("Plan",),
+                ("Teardown", "G4", "FAIL"), ("Plan",), ("Teardown", "G4", "PASS"),
+                ("Build",), ("Verify",))
+        with fresh_workdir() as work:
+            ok, why = self._check(work, rows)
+            self.assertTrue(ok, why)
+
+    def test_two_loops(self):
+        """P2: a second Define after a Verify pass starts a new milestone."""
+        with fresh_workdir() as work:
+            ok, why = self._check(work, self.FULL + self.FULL)
+            self.assertTrue(ok, why)
+            self.assertIn("2 loop(s)", why)
+
+    def test_rewind_without_fail_is_defect(self):
+        with fresh_workdir() as work:
+            ok, why = self._check(work, self.REWIND)
+            self.assertFalse(ok)
+            self.assertIn("stage order defect", why)
+
+    def test_replan_after_build_needs_fresh_teardown(self):
+        """A re-plan voids the old teardown pass."""
+        rows = (("Define",), ("Economy",), ("Plan",), ("Teardown",), ("Build",),
+                ("Verify", "G6", "FAIL"), ("Plan",), ("Build",), ("Verify",))
+        with fresh_workdir() as work:
+            ok, why = self._check(work, rows)
+            self.assertFalse(ok)
+            self.assertIn("pre-build gate", why)
+
+    def test_before_build_during_verify_rework(self):
+        """A Build logged during a failed Verify is not 'ahead' on the rework
+        check; only the stages before the latest FAIL matter."""
+        rows = (("Define",), ("Economy",), ("Plan",), ("Teardown",), ("Build",),
+                ("Verify", "G?", "FAIL"))
+        with fresh_workdir() as work:
+            ok, why = self._check(work, rows, "Build")
+            self.assertTrue(ok, why)
+
+    def test_closed_loop_defect_is_reported(self):
+        """A defect in an earlier loop is reported, not hidden by the last."""
+        closed = (("Define",), ("Economy",), ("Plan", "G3", "FAIL"),
+                  ("Teardown",), ("Build",), ("Verify",))
+        with fresh_workdir() as work:
+            ok, why = self._check(work, closed + self.FULL)
+            self.assertFalse(ok)
+            self.assertIn("loop 1 of 2", why)
+
+    def test_cli_exit_codes(self):
+        for rows, code in ((self.REWORK, 0), (self.REWIND, 1)):
+            with fresh_workdir() as work:
+                write_stage_log(work, *(stage_record(*row) for row in rows))
+                with redirect_stdout(io.StringIO()):
+                    self.assertEqual(
+                        dvc_stage.main(["--workdir", str(work), "check"]), code)
+
+
 class TestTicketPublishGate(unittest.TestCase):
     """M7: publish needs a recorded approval, and only an explicit
     --interactive session can record one."""
@@ -681,10 +825,141 @@ class TestTicketPublishGate(unittest.TestCase):
             plan = self._plan(work)
             self.assertEqual(self._run(work, ["--tickets", "T1,T2", "--interactive",
                                               "--by", "Brad", "approve"]), 0)
+            write_stage_log(work, stage_record("Define"), stage_record("Economy"),
+                            stage_record("Plan"))
+            dvc_stage.log(work, "Teardown", "G4", "PASS", plan=str(plan))
             self.assertEqual(self._run(work, ["--tickets", "T1,T2", "check"]), 0)
             self.assertEqual(self._run(work, ["--tickets", "T1,T3", "check"]), 1)
             plan.write_text("# Plan\n\n1. two\n", encoding="utf-8")
             self.assertEqual(self._run(work, ["--tickets", "T1,T2", "check"]), 1)
+
+    def test_check_fails_without_teardown(self):
+        """N5: approval alone no longer publishes; teardown must be recorded."""
+        with fresh_workdir() as work:
+            self._plan(work)
+            self.assertEqual(self._run(work, ["--tickets", "T1", "--interactive",
+                                              "--by", "Brad", "approve"]), 0)
+            self.assertEqual(self._run(work, ["--tickets", "T1", "check"]), 1)
+
+    def test_teardown_without_plan_digest_fails(self):
+        with fresh_workdir() as work:
+            self._plan(work)
+            self.assertEqual(self._run(work, ["--tickets", "T1", "--interactive",
+                                              "--by", "Brad", "approve"]), 0)
+            write_stage_log(work, stage_record("Define"), stage_record("Economy"),
+                            stage_record("Plan"), stage_record("Teardown", "G4"))
+            self.assertEqual(self._run(work, ["--tickets", "T1", "check"]), 1)
+
+    def test_failed_or_stale_teardown_fails(self):
+        """N5: a later Teardown FAIL, or a re-plan, voids the pass."""
+        with fresh_workdir() as work:
+            plan = self._plan(work)
+            self.assertEqual(self._run(work, ["--tickets", "T1", "--interactive",
+                                              "--by", "Brad", "approve"]), 0)
+            write_stage_log(work, stage_record("Define"), stage_record("Economy"),
+                            stage_record("Plan"))
+            dvc_stage.log(work, "Teardown", "G4", "PASS", plan=str(plan))
+            dvc_stage.log(work, "Teardown", "G4", "FAIL")
+            self.assertEqual(self._run(work, ["--tickets", "T1", "check"]), 1)
+        with fresh_workdir() as work:
+            plan = self._plan(work)
+            self.assertEqual(self._run(work, ["--tickets", "T1", "--interactive",
+                                              "--by", "Brad", "approve"]), 0)
+            write_stage_log(work, stage_record("Define"), stage_record("Economy"),
+                            stage_record("Plan"))
+            dvc_stage.log(work, "Teardown", "G4", "PASS", plan=str(plan))
+            dvc_stage.log(work, "Plan", "G3", "PASS")
+            self.assertEqual(self._run(work, ["--tickets", "T1", "check"]), 1)
+
+    def test_plan_body_edit_after_teardown_fails(self):
+        with fresh_workdir() as work:
+            plan = self._plan(work, "# Plan\n\n1. one\n2. two\n")
+            write_stage_log(work, stage_record("Define"), stage_record("Economy"),
+                            stage_record("Plan"))
+            dvc_stage.log(work, "Teardown", "G4", "PASS", plan=str(plan))
+            self.assertEqual(self._run(work, ["--tickets", "T1", "--interactive",
+                                              "--by", "Brad", "approve"]), 0)
+            plan.write_text("# Plan\n\n1. one\n", encoding="utf-8")
+            self.assertEqual(self._run(work, ["--tickets", "T1", "check"]), 1)
+
+
+class TestPlanLifecycleCloses(unittest.TestCase):
+    """N6: the plan reaches Build stamped APPROVED with the publish gate
+    green, because the digest leaves out the Status line and card ids."""
+
+    LIFE = ("# Plan\n\nStatus: DRAFT\n\n### T1 a\n### T2 b\n\n"
+            "1. one\n2. two\n")
+    CARDED = ("# Plan\n\nStatus: APPROVED\n\n### T1 a — card: t_ab12\n"
+              "### T2 b — card: t_cd34\n\n1. one\n2. two\n")
+
+    def _plan(self, work, text):
+        plan = work / ".pipeline" / "plans" / "01-x.md"
+        plan.parent.mkdir(parents=True, exist_ok=True)
+        plan.write_text(text, encoding="utf-8")
+        return plan
+
+    def _teardown(self, work, plan):
+        write_stage_log(work, stage_record("Define"), stage_record("Economy"),
+                        stage_record("Plan"))
+        dvc_stage.log(work, "Teardown", "G4", "PASS", plan=str(plan))
+
+    def _run(self, work, tail):
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            return dvc_tickets.main(["--workdir", str(work)] + tail)
+
+    def _approve(self, work, ids):
+        return self._run(work, ["--tickets", ids, "--interactive", "--by", "Brad",
+                                "approve"])
+
+    def test_full_lifecycle_closes(self):
+        with fresh_workdir() as work:
+            plan = self._plan(work, self.LIFE)
+            self._teardown(work, plan)
+            self.assertEqual(self._approve(work, "T1,T2"), 0)
+            plan.write_text(self.LIFE.replace("DRAFT", "APPROVED"),
+                            encoding="utf-8")
+            self.assertEqual(self._run(work, ["--tickets", "T1,T2", "check"]), 0)
+            plan.write_text(self.CARDED, encoding="utf-8")
+            self.assertEqual(self._run(work, ["--tickets", "T1,T2", "check"]), 0)
+
+    def test_status_line_carrying_content_counts(self):
+        with fresh_workdir() as work:
+            plan = self._plan(work, self.LIFE)
+            self._teardown(work, plan)
+            self.assertEqual(self._approve(work, "T1,T2"), 0)
+            plan.write_text(self.LIFE.replace(
+                "Status: DRAFT", "Status: APPROVED; cut T2"), encoding="utf-8")
+            self.assertEqual(self._run(work, ["--tickets", "T1,T2", "check"]), 1)
+
+    def test_body_edit_still_breaks_binding(self):
+        with fresh_workdir() as work:
+            plan = self._plan(work, self.LIFE)
+            self._teardown(work, plan)
+            self.assertEqual(self._approve(work, "T1,T2"), 0)
+            plan.write_text(self.LIFE.replace("2. two\n", ""), encoding="utf-8")
+            self.assertEqual(self._run(work, ["--tickets", "T1,T2", "check"]), 1)
+
+    def test_crlf_does_not_change_digest(self):
+        with fresh_workdir() as work:
+            lf = work / "lf.md"
+            crlf = work / "crlf.md"
+            lf.write_bytes(self.LIFE.encode("utf-8"))
+            crlf.write_bytes(self.LIFE.replace("\n", "\r\n").encode("utf-8"))
+            self.assertEqual(dvc_stage.plan_digest(lf),
+                             dvc_stage.plan_digest(crlf))
+
+    def test_v1_record_still_checks(self):
+        """A pre-v2 record carries no digest; raw sha256 still decides."""
+        with fresh_workdir() as work:
+            plan = self._plan(work, self.LIFE)
+            self._teardown(work, plan)
+            path = work / ".pipeline" / "ticket-approval.json"
+            path.write_text(json.dumps({"format": "dvc-tickets-v1", "approvals": [{
+                "format": "dvc-tickets-v1", "approved_by": "Brad",
+                "approved_at": "2026-01-01T00:00:00+0000",
+                "tickets": ["T1"], "plan": plan.name,
+                "plan_sha256": dvc_tickets._sha(plan)}]}), encoding="utf-8")
+            self.assertEqual(self._run(work, ["--tickets", "T1", "check"]), 0)
 
 
 class TestG6DerivedFromTheRecord(unittest.TestCase):
@@ -707,6 +982,8 @@ GRILL_SKILL = ROOT / "skills" / "grill-with-docs" / "SKILL.md"
 OVERLAY = ROOT / "plugins" / "disciplined-vibe-coding" / "SKILL.md"
 GRILLED_SPEC = ("# To-spec (grilled)\n\nJob: {job}\n\n"
                 "rung: full-spec\n\n"
+                "grilled-by: grill-with-docs\n"
+                "GRILLED-BY-SURVIVES\n\n"
                 "## Decisions\n"
                 "- Decision: keep this marker / Why: the grill wrote it\n\n"
                 "GRILLED-OUTPUT-SURVIVES\n")
@@ -760,6 +1037,16 @@ class TestGrillSkillContract(unittest.TestCase):
         self.assertIn("kanban_block(kind=\"needs_input\")", self.text)
         self.assertIn("do not proceed on assumptions", self.low)
 
+    def test_runner_half_matches_the_code(self):
+        """The skill's claim about dvc_run must be what dvc_run does."""
+        self.assertIn("dvc_run.py` writes no round file", self.text)
+        self.assertIn("exit 4", self.low)
+        self.assertIn("grilled-by: grill-with-docs", self.text)
+        self.assertIn("status:", self.low)
+        runner = (ROOT / "scripts" / "dvc_run.py").read_text(encoding="utf-8")
+        for literal in ("grilled-by: grill-with-docs", "status"):
+            self.assertIn(literal, runner)
+
 
 class TestGrilledSpecSurvivesDefine(unittest.TestCase):
     """D6: a headless Define must not silently destroy the grill's spec."""
@@ -771,7 +1058,8 @@ class TestGrilledSpecSurvivesDefine(unittest.TestCase):
         grill = work / ".pipeline" / "grill"
         grill.mkdir(parents=True, exist_ok=True)
         (grill / "probe-round-1.md").write_text(
-            "# Round 1\n\n1. What does the term mean? (recommended: A)\n",
+            "# Round 1\n\nstatus: answered\n\n"
+            "1. What does the term mean? (recommended: A)\n",
             encoding="utf-8")
 
     def test_seeded_grilled_marker_survives_a_headless_define(self):
@@ -781,8 +1069,11 @@ class TestGrilledSpecSurvivesDefine(unittest.TestCase):
             spec = (work / ".pipeline" / "to-spec.md").read_text(
                 encoding="utf-8")
             self.assertIn("GRILLED-OUTPUT-SURVIVES", spec)
+            self.assertIn("GRILLED-BY-SURVIVES", spec)
             self.assertIn("grilled spec loaded, not overwritten", out)
-            self.assertEqual(code, 2, out)  # past Define and the gates: NOT BUILT
+            self.assertIn("OUT OF SCOPE", out)
+            # full-spec is above the runner's ceiling: stopped before Plan
+            self.assertEqual(code, 5, out)
 
     def test_operator_flag_overwrites_and_logs_the_bypass(self):
         with fresh_workdir() as work:
@@ -798,23 +1089,108 @@ class TestGrilledSpecSurvivesDefine(unittest.TestCase):
             self.assertIn('"result": "BYPASS"', log)
             self.assertEqual(code, 2, out)
 
-    def test_round_file_newer_than_the_runner_stamp_protects_it(self):
-        """The real order: a headless Define ran, then the grill interviewed."""
+    # --- N8: the runner's rung ceiling stops full-spec before Build ---
+
+    def test_full_spec_stops_out_of_scope_before_build(self):
         with fresh_workdir() as work:
-            run_job(work, job="grill probe")  # Define stamps its own template
+            self.seed(work, "grill probe")
+            code, out, text = run_job(work, PASS_BUILD, job="grill probe")
+            self.assertEqual(code, 5, out)
+            self.assertFalse((work / "out.txt").exists())
+            self.assertEqual(list((work / ".pipeline").glob("plans/*.md")), [])
+            self.assertNotIn("G1", out)
+            self.assertIn("Result: OUT OF SCOPE", text)
+            again, out2, _ = run_job(work, PASS_BUILD, job="grill probe")
+            self.assertNotEqual(again, 3, out2)  # 5 does not block a re-run
+
+    def test_project_rung_also_stops(self):
+        with fresh_workdir() as work:
             spec = work / ".pipeline" / "to-spec.md"
-            self.assertIn("generated-by: dvc_run.py",
-                          spec.read_text(encoding="utf-8"))
-            grill = work / ".pipeline" / "grill"
-            grill.mkdir(parents=True, exist_ok=True)
-            round_file = grill / "probe-round-1.md"
-            round_file.write_text("# Round 1\n", encoding="utf-8")
-            later = spec.stat().st_mtime + 5
-            os.utime(round_file, (later, later))
-            code, out, _ = run_job(work, job="grill probe", fresh=True)
+            spec.parent.mkdir(parents=True, exist_ok=True)
+            spec.write_text("# To-spec\n\nJob: probe\n\nrung: project\n"
+                            "grilled-by: grill-with-docs\n", encoding="utf-8")
+            code, out, _ = run_job(work, job="probe")
+            self.assertEqual(code, 5, out)
+
+    def test_grilled_micro_spec_runs(self):
+        """At the ceiling: a grilled micro-spec gets past it (NOT BUILT)."""
+        with fresh_workdir() as work:
+            spec = work / ".pipeline" / "to-spec.md"
+            spec.parent.mkdir(parents=True, exist_ok=True)
+            spec.write_text("# To-spec\n\nJob: probe\n\nrung: micro-spec\n"
+                            "grilled-by: grill-with-docs\n", encoding="utf-8")
+            code, out, _ = run_job(work, job="probe")
+            self.assertEqual(code, 2, out)
+
+    # --- N3: a parked grill round stops the run before Define writes ---
+
+    def park_round(self, work, text="# Round 1\n\n1. What does X mean?\n",
+                   name="probe-round-1.md"):
+        grill = work / ".pipeline" / "grill"
+        grill.mkdir(parents=True, exist_ok=True)
+        (grill / name).write_text(text, encoding="utf-8")
+
+    def test_open_round_file_parks_the_run_before_define(self):
+        """A round still open is a park, not a spec: exit 4, spec untouched."""
+        with fresh_workdir() as work:
+            spec = work / ".pipeline" / "to-spec.md"
+            spec.parent.mkdir(parents=True, exist_ok=True)
+            spec.write_text("# To-spec\n\nkeep me\n", encoding="utf-8")
+            before = spec.read_bytes()
+            self.park_round(work, "# Round 1\n\nstatus: open\n\n1. Q? (A)\n")
+            code, out, text = run_job(work)
+            self.assertEqual(code, 4, out)
+            self.assertIn("STOP: NEEDS INPUT", out)
+            self.assertEqual(spec.read_bytes(), before)
+            self.assertNotIn("[Plan]", out)
+            self.assertIn("Result: NEEDS INPUT", text)
+
+    def test_round_file_without_a_status_line_counts_as_open(self):
+        with fresh_workdir() as work:
+            self.park_round(work)
+            code, out, _ = run_job(work)
+            self.assertEqual(code, 4, out)
+            self.assertIn("probe-round-1.md", out)
+
+    def test_answered_round_with_no_grilled_spec_parks_too(self):
+        with fresh_workdir() as work:
+            self.park_round(work, "# Round 1\n\nstatus: answered\n")
+            code, out, _ = run_job(work)
+            self.assertEqual(code, 4, out)
+            self.assertIn("no grilled spec is on disk", out)
+
+    def test_answered_round_with_grilled_spec_runs_past_define(self):
+        with fresh_workdir() as work:
+            self.seed(work, "grill probe")
+            code, out, _ = run_job(work, job="grill probe")
+            self.assertEqual(code, 5, out)  # loaded at Define, ceiling stops it
+            self.assertIn("[Define]", out)
             self.assertIn("grilled spec loaded", out)
-            self.assertIn("generated-by: dvc_run.py", spec.read_text(
-                encoding="utf-8"))  # still the same file, not rewritten
+
+    def test_overwrite_flag_does_not_override_an_open_round(self):
+        with fresh_workdir() as work:
+            spec = work / ".pipeline" / "to-spec.md"
+            spec.parent.mkdir(parents=True, exist_ok=True)
+            spec.write_text("# To-spec\n\nkeep me\n", encoding="utf-8")
+            before = spec.read_bytes()
+            self.park_round(work, "# Round 1\n\nstatus: open\n")
+            code, out, _ = run_job(work, extra=["--overwrite-grilled-spec"])
+            self.assertEqual(code, 4, out)
+            self.assertIn("does not override an open grill round", out)
+            self.assertEqual(spec.read_bytes(), before)
+
+    def test_grilled_by_line_loads_without_any_round_file(self):
+        """The marker is the trace; the timestamp race is gone."""
+        with fresh_workdir() as work:
+            (work / ".pipeline").mkdir(parents=True, exist_ok=True)
+            spec = work / ".pipeline" / "to-spec.md"
+            spec.write_text(GRILLED_SPEC.format(job="grill probe"),
+                            encoding="utf-8")
+            before = spec.read_bytes()
+            code, out, _ = run_job(work, job="grill probe")
+            self.assertIn("grilled spec loaded", out)
+            self.assertEqual(spec.read_bytes(), before)
+            self.assertEqual(code, 5, out)  # full-spec: ceiling stops it
 
 
 if __name__ == "__main__":

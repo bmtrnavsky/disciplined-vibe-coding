@@ -1,5 +1,58 @@
 # Changelog
 
+## Unreleased
+
+The gates now tell the truth about what they prove, and the Define-to-Verify
+log can record an honest fix without a waiver. Covered by
+`tests/dvc_behavioural.py` (75/75); `scripts/selfcheck.sh` passes 56/56 but is
+lint only and proves nothing on its own.
+
+Two changes bite on a workdir that already exists. An old grilled spec with no
+`grilled-by: grill-with-docs` line is no longer recognised, so Define
+overwrites it — the old detector (a round file newer than the runner's stamp)
+missed every interactive grill, so that spec was never protected. And an old
+grill round file with no `status:` line now reads as open, so the run stops at
+Define with NEEDS INPUT (exit 4) until the round is answered or removed.
+
+- Fixed: grill trace (N3) — the mtime guess is deleted. The spec carries
+  `grilled-by: grill-with-docs`; each round carries `status: open` or
+  `status: answered`, and a round with no status line fails closed as open. An
+  open round, or answered rounds with no grilled spec on disk, stops at Define
+  with NEEDS INPUT (exit 4): no spec written, no plan, nothing built, and
+  `--overwrite-grilled-spec` does not override it. Exit codes 0–5 are now
+  documented in `dvc_run.py`.
+- Fixed: grill skill honesty (N4) — `grill-with-docs` no longer claims
+  `dvc_run` runs the interview. Headless stays a do-not-fire condition (a
+  Kanban worker parks and blocks); the runner's honest half is honouring a
+  parked grill, which N3 implements. A contract test holds the skill text to
+  the code.
+- Fixed: runner ceiling (N8) — the runner declares one-liner and micro-spec as
+  its scope. A spec above it stops with OUT OF SCOPE (exit 5) before any gate,
+  plan or build, and the spec is kept as written. This is a run result, not a
+  gate; the gate list stays G1–G7.
+- Fixed: G1 job line (N1) — G1 parses the first `Job:` line and compares it
+  whitespace-normalised instead of matching a substring, and a missing line
+  says so instead of "swapped or hollow". `--job` is written to the template as
+  one line, so a multi-line job cannot inject `rung:` or `Result:` lines.
+- Fixed: stage log loops (N2) — `dvc_stage.py check` reads the log as
+  Define-to-Verify loops. A FAIL clears on a later PASS for the same gate (a
+  fix) or a BYPASS (a waiver); a step back is legal only directly after a FAIL;
+  every Build needs a Teardown PASS or BYPASS since the latest
+  Define/Economy/Plan record, so a re-plan voids the old pass.
+- Fixed: publish gate (N5) — `dvc_tickets.py check` reads the stage log as well
+  as the approval: the latest Teardown PASS or BYPASS must carry the digest of
+  the plan being published, and Teardown takes `--plan` to record it. An
+  approval alone, a Teardown FAIL, a re-plan, or a plan body edit since
+  teardown all refuse. This proves teardown was recorded on this plan, not that
+  the review was good.
+- Fixed: plan lifecycle (N6) — approval and teardown bind a plan digest that
+  leaves out exactly two bookkeeping items: the `Status:` line (`DRAFT` or
+  `APPROVED`), and `— card: <id>` on a ticket heading. Stamping APPROVED and
+  writing card ids after approval no longer break the binding, so a ticketed
+  plan reaches Build APPROVED with the gate green; any other body edit still
+  fails. New records are `dvc-tickets-v2`; v1 records carry no digest and keep
+  checking against the raw plan sha256.
+
 ## 0.3.2 - 2026-11-10
 
 Define gets an interview with teeth. Covered by `tests/dvc_behavioural.py`

@@ -24,8 +24,8 @@ Do not fire when:
 
 - the rung is **below full-spec** — the overlay's 3-question docs check is the
   whole grill there;
-- the session is **headless** (`dvc_run.py`) or a **Kanban worker** — write the
-  round file and stop;
+- the session is **headless** (`dvc_run.py`) or a **Kanban worker** — nobody
+  can answer; see §Where no human can answer and stop;
 - the **vocabulary is settled** — every term already means one thing in the repo;
 - the **plan is already approved** — grilling approved work re-litigates it.
 
@@ -39,6 +39,9 @@ If you need a fourth question in one round, the ask is too big: step up the rung
 or split the milestone. Do not ask more.
 
 ## Steps (in order)
+
+Headless changes the shape: skip steps 3, 4 and the step-8 quiz, and go to
+§Where no human can answer.
 
 1. **Read before you ask.** Read the ask, any to-spec draft, the plan if one
    exists, `GLOSSARY.md` and `docs/adr/` if they exist, and the code the change
@@ -84,8 +87,12 @@ or split the milestone. Do not ask more.
 
    Then write the to-spec from `templates/to-spec.md` in the same session: the
    settled words into the goal and scope, the decisions into `Decisions`,
-   anything still open into `Open questions` as a stated assumption. Hand to
-   `plan` when done. This skill never plans and never builds.
+   anything still open into `Open questions` as a stated assumption — a named
+   assumption only where the unanswered question still matters, otherwise the
+   round's recommendation stands. `grilled-by: grill-with-docs` goes in the
+   spec when the marker is absent: it is the line `dvc_run.py` loads the spec
+   by, and without it the run parks again over answered rounds. Hand to `plan`
+   when done. This skill never plans and never builds.
 
 ## Where no human can answer
 
@@ -94,18 +101,24 @@ do not guess, and do not proceed on assumptions for grill content: the answers
 are the material the decisions are made of, and a guess here is a decision
 nobody made.
 
-1. Write `.pipeline/grill/<slug>-round-N.md`: the numbered questions, each with
-   a recommendation, plus the read list. One file per round.
-2. State plainly that the interview did not finish, and name the round file.
-3. Mark the work `needs_input` and stop. A Kanban worker calls
-   `kanban_block(kind="needs_input")`; a `dvc_run` run writes the round file and
-   stops without writing a spec. The next interactive run reads the round file
-   and continues from it.
+- **The grill writes no spec and no plan.** It writes
+  `.pipeline/grill/<slug>-round-N.md`: the numbered questions, each with a
+  recommendation, plus the read list. One file per round, and that file
+  carries exactly one `status: open` line — one line for the round, never a
+  status line per question.
+- **A Kanban worker** states plainly that the interview did not finish, names
+  the round file, and parks its card: `kanban_block(kind="needs_input")`.
+- **`dvc_run.py` writes no round file**, and no file of its own here. It has
+  no LLM in Define, so the run walks away with exit 4 (NEEDS INPUT). The
+  grill's round file is what parks the run; the runner only reads it.
 
-The case that makes this matter: `dvc_run`'s Define stage writes a micro-spec of
-its own. It loads an existing grilled spec instead of overwriting it (a grill
-round file newer than the runner's own template stamp is the trace it looks
-for), and only an explicit operator flag replaces one, logged as a bypass.
+The park lasts until an interactive session answers the rounds and writes the
+spec: the rounds carry `status: answered` and the to-spec carries
+`grilled-by: grill-with-docs`. Then `dvc_run` loads that spec instead of
+overwriting it; only an explicit operator flag (`--overwrite-grilled-spec`)
+replaces one, and it is logged as a bypass. A grilled spec above micro-spec
+stops `dvc_run` with **OUT OF SCOPE** (exit 5): run it through the interactive
+pipeline.
 
 ## Done when
 
@@ -123,8 +136,9 @@ for), and only an explicit operator flag replaces one, logged as a bypass.
 - Batch glossary writes at the end. The end is where files get lost.
 - Offer an ADR that fails one of the three gates, or create `docs/adr/` in a repo
   that does not have one.
-- Run the interview inside `dvc_run.py` or on a Kanban worker. Write the round
-  file and stop.
+- Run the interview inside `dvc_run.py` or on a Kanban worker. The grill writes
+  the round file; `dvc_run.py` writes no round file — it parks the run and
+  exits without writing a spec.
 - Ask the user for a fact the repo, the docs, or a tool can answer.
 - Exceed 3 questions in a round or 3 rounds in a session.
 - Publish anything. This skill has no spend and no approval gate.
@@ -144,7 +158,9 @@ for), and only an explicit operator flag replaces one, logged as a bypass.
 
 ## Guardrails
 
-- A human present, or a round file, `needs_input` and a stop.
+- A human present, or a round file, `needs_input` and a stop. The grill writes
+  that round file; `dvc_run.py` writes no round file and no spec. Either path
+  parks — it never proceeds on a guess.
 - 3 questions a round, 3 rounds a session.
 - No spec, no plan, no code from this skill.
 - Glossary and ADRs only in the repo being worked on — never in DVC's own repo.

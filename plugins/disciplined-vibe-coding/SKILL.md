@@ -54,10 +54,13 @@ PASS/FAIL, one-line reason), `scripts/dvc_stage.py bypass --by NAME
 --why REASON` records a waiver — both flags required, so the tool
 cannot write an unlogged bypass — and `scripts/dvc_stage.py check`
 fails on a missing stage record, a FAIL with no later bypass, or a
-Build recorded before a Teardown pass. `verify` runs that check before
-any done-claim. A stage with no record at all cannot be told from a
-silent bypass, so it counts as one: that is the defect the log exists
-to make countable.
+Build recorded before a Teardown pass. A FAIL clears when the same gate
+later logs PASS (the fix) or BYPASS (the waiver). Rework steps back only
+right after a FAIL. A re-plan needs a fresh Teardown pass before Build.
+A new milestone is a new loop: Define after a Verify pass. `verify` runs
+that check before any done-claim. A stage with no record at all cannot be
+told from a silent bypass, so it counts as one: that is the defect the
+log exists to make countable.
 Since card series DVC 1/4 the spec record is hashed at Define, and fix B
 made it a gate: `dvc_run.py` hashes the spec at Define, declared drift
 stays advisory, and undeclared drift fails the run at Verify (G7).
@@ -138,7 +141,7 @@ Full format at full-spec rung and above (`templates/writing-plan.md`):
 steps, files touched, test strategy, verify criteria, commit message draft.
 At micro-spec rung it collapses to 3 bullets. Never freeform
 "I'll figure it out as I go."
-`to-tickets` fires on its conditions, not on request: at full-spec rung and above, with an approved plan, when the work needs the split (8+ steps, 2+ workers, or multi-session), it cuts ticket groups with explicit `blocked by:` edges inside this plan file. Draft before teardown; publish only after teardown passes and the quiz is approved — the quiz stays mandatory because publishing dispatches workers, and `scripts/dvc_tickets.py check --tickets <ids>` is the gate that tells the skill approval was recorded. Headless runs draft under `.pipeline/tickets/` and stop: with no `--interactive` approval they cannot pass that check. Do not fire below full-spec, on a plan already ticketed, or to publish from a headless run.
+`to-tickets` fires on its conditions, not on request: at full-spec rung and above, with an approved plan, when the work needs the split (8+ steps, 2+ workers, or multi-session), it cuts ticket groups with explicit `blocked by:` edges inside this plan file. Draft before teardown; publish only after teardown passes and the quiz is approved — the quiz stays mandatory because publishing dispatches workers, and `scripts/dvc_tickets.py check --tickets <ids>` is the gate that tells the skill approval **and teardown** were recorded on this plan. Headless runs draft under `.pipeline/tickets/` and stop: with no `--interactive` approval they cannot pass that check. Do not fire below full-spec, on a plan already ticketed, or to publish from a headless run.
 
 ## 3.5. Teardown — goldfish review before code counts
 
@@ -156,7 +159,8 @@ so that pass runs after Build and is the **post-build drift review**
 
 - **Interactive (this doctrine):** teardown reviews spec and plan before
   code exists. Exit it with `scripts/dvc_stage.py log --stage Teardown
-  --gate G4 --result PASS --reason "..."`; `dvc_stage.py check` then
+  --gate G4 --result PASS --plan <plan file> --reason "..."` (required when
+  `to-tickets` will publish from this plan); `dvc_stage.py check` then
   refuses any log where Build comes before a Teardown pass.
 - **Headless (`dvc_run.py`):** G4 is the post-build drift review; the
   post-build checks the doctrine already assigns to Verify are G5 (proof
@@ -253,8 +257,8 @@ with zero re-brief.
   and the machine-checkable copy in `.pipeline/stages.jsonl`
   (`scripts/dvc_stage.py log|bypass|check`).
 - Ticket approval: `.pipeline/ticket-approval.json` — who approved which
-  ticket set, bound to the plan's sha256 (`scripts/dvc_tickets.py
-  approve --interactive --by NAME`).
+  ticket set, bound to the plan digest (Status line and card ids excluded;
+  `scripts/dvc_tickets.py approve --interactive --by NAME`).
 - Research trail: `.pipeline/read.log` entries (`research`).
 - Spec lock: `.pipeline/spec.lock` — sha256 at Define, declarations on
   change (`spec_lock.py lock` / `declare --by NAME --why REASON`).

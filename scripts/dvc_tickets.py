@@ -9,10 +9,15 @@ context, a prompt, or a session shape. A headless run therefore cannot
 record approval, so `check` fails and it cannot publish — it drafts and
 stops, which is what the skill says it does.
 
-The approval binds the plan file's sha256 and the exact ticket set. A plan
-edited after approval, or a different cut of tickets, fails `check` until a
-human approves again. Approvals append: the file is an audit trail, and
-`check` reads the newest matching record.
+The approval binds the plan's digest and the exact ticket set. The digest
+is the file's sha256 with two bookkeeping lines left out: its `Status:` line
+and the `— card: <id>` ids written on ticket headings at publish. So the
+plan can be stamped APPROVED and have its cards recorded without breaking
+the approval; every other edit does break it. `check` also requires a
+Teardown pass recorded against that same digest, which proves teardown ran
+on this plan, not that the review was good. Approvals append: the file is
+an audit trail, and `check` reads the newest matching record. Records older
+than v2 carry no digest; they are compared by raw sha256.
 """
 
 import argparse
@@ -22,9 +27,12 @@ import sys
 import time
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import dvc_stage  # noqa: E402
+
 APPROVALS_REL = ".pipeline/ticket-approval.json"
 PLANS_REL = ".pipeline/plans"
-FORMAT = "dvc-tickets-v1"
+FORMAT = "dvc-tickets-v2"
 
 
 def _sha(path):
@@ -65,7 +73,8 @@ def approve(workdir, plan_ref, tickets, by):
         raise SystemExit(f"plan not found: {plan}")
     rec = {"format": FORMAT, "approved_by": by,
            "approved_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
-           "tickets": ids, "plan": plan.name, "plan_sha256": _sha(plan)}
+           "tickets": ids, "plan": plan.name, "plan_sha256": _sha(plan),
+           "plan_digest": dvc_stage.plan_digest(plan)}
     path = Path(workdir) / APPROVALS_REL
     path.parent.mkdir(parents=True, exist_ok=True)
     data = {"format": FORMAT, "approvals": _load(workdir) + [rec]}
@@ -83,13 +92,20 @@ def check(workdir, plan_ref, tickets):
     if not plan.is_file():
         return False, f"plan not found: {plan}"
     sha = _sha(plan)
+    digest = dvc_stage.plan_digest(plan)
     reasons = []
     for rec in reversed(_load(workdir)):
         if rec.get("plan") != plan.name:
             continue
-        if rec.get("plan_sha256") != sha:
-            reasons.append(f"plan changed since {rec.get('approved_by')} "
-                           f"approved it ({rec.get('approved_at')}); re-approve")
+        # v1 records carry no digest; they keep the raw-sha comparison.
+        if rec.get("plan_digest"):
+            changed = rec["plan_digest"] != digest
+        else:
+            changed = rec.get("plan_sha256") != sha
+        if changed:
+            reasons.append(f"plan body changed since {rec.get('approved_by')} "
+                           f"approved it ({rec.get('approved_at')}); the Status "
+                           "line and card ids do not count; re-approve")
             continue
         approved = rec.get("tickets") or []
         missing = [t for t in ids if t not in approved]
@@ -101,8 +117,12 @@ def check(workdir, plan_ref, tickets):
             reasons.append("approval covers tickets not in this cut: "
                            + ", ".join(extra))
             continue
+        ok, why = dvc_stage.teardown_for_plan(workdir, plan)
+        if not ok:
+            return False, f"teardown gate: {why}"
         return True, (f"publish approved by {rec.get('approved_by')} at "
-                      f"{rec.get('approved_at')} (plan sha {sha[:12]})")
+                      f"{rec.get('approved_at')} (plan digest {digest[:12]}); "
+                      f"{why}")
     if reasons:
         return False, reasons[0]
     return False, ("no approval recorded for this plan and ticket set; a headless "
@@ -138,7 +158,8 @@ def main(argv=None):
         return 2
     rec = approve(ns.workdir, ns.plan, ns.tickets, ns.by.strip())
     print(f"approval recorded: {len(rec['tickets'])} ticket(s) by "
-          f"{rec['approved_by']} (plan sha {rec['plan_sha256'][:12]})", flush=True)
+          f"{rec['approved_by']} (plan digest {rec['plan_digest'][:12]})",
+          flush=True)
     return 0
 
 

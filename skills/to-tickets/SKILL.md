@@ -26,10 +26,11 @@ drafting is free and publishing dispatches workers (spend):
 1. The draft exists and the quiz (§5) is approved by the user.
 2. Teardown has passed on the plan that carries the ticket groups.
 3. `scripts/dvc_tickets.py --tickets T1,T2,... check` exits 0. That command
-   is the recorded proof of 1 and 2: `approve --interactive --by NAME` writes
-   who approved which ticket set, bound to the plan's sha256. No record, no
-   publish — and a headless run cannot make one, because `approve` refuses
-   without the explicit `--interactive` flag.
+   reads the approval record, bound to the plan digest, **and** the stage log:
+   the latest Teardown pass must carry this plan's digest. Log teardown with
+   `dvc_stage.py log --stage Teardown --gate G4 --result PASS --plan <plan
+   file>`. No record, no publish — and a headless run cannot make one,
+   because `approve` refuses without the explicit `--interactive` flag.
 
 Do not fire when: the rung is below full-spec; the plan is already ticketed
 (its ticket groups exist); or the next move would be publishing from a headless
@@ -44,7 +45,8 @@ stated as judgment.
 |---|---|---|
 | interactive session before publishing | **ENFORCED** — `approve` exits 2 without `--interactive` | §5 |
 | quiz approved before any `kanban_create` | **ENFORCED at the publish step** — `check` exits 1 without a matching record; publishing without running it is an unlogged approval, a pipeline defect | §6 |
-| approval binds the plan it approved | **ENFORCED** — the record holds the plan's sha256 | §6 |
+| approval binds the plan it approved | **ENFORCED** — the record holds the plan digest (Status line and card ids excluded) | §6 |
+| teardown passed on this plan | **ENFORCED as a record** — `check` exits 1 unless the latest Teardown PASS/BYPASS in the current loop carries this plan's digest; it proves teardown was logged on this plan, not that the review was good | §6 |
 | every plan step in exactly one ticket | guidance — plan prose has no machine-readable step→ticket map; the cut is checked by re-reading it against Steps | §2 |
 | assignee on every card | guidance — no API refuses an unassigned card, so the publish step lists the cards it created and confirms it | §6 |
 | stop on a partial publish, no retry | guidance — it depends on a tool failing mid-loop, which cannot be pre-checked | §6 |
@@ -66,8 +68,11 @@ and publish only once teardown has passed.
 You may read code to understand the plan. You may not change code. Your one
 write is this skill's cut into the plan file — ticket groups, their `blocked by:`
 lines, and nothing else — because the plan file is the one artifact. The
-orchestrator owns that file: when you edit an approved plan, re-stamp its status
-`DRAFT`; the quiz re-approves it.
+orchestrator owns that file. When you edit an approved plan, re-stamp its
+status `DRAFT`; the quiz re-approves it, and right after `approve` you stamp
+`Status: APPROVED`. The Status line and the card ids written in §6 are
+bookkeeping: the plan digest leaves them out, so neither breaks the approval
+or the teardown binding. Any other edit does.
 
 ### 2. Cut the plan into tickets
 
@@ -146,14 +151,16 @@ the pack, never inferred:
 python scripts/dvc_tickets.py --interactive --by <name> --tickets T1,T2 approve
 ```
 
-No flag, no record, no publish. Editing the plan after the record (including
-the DRAFT re-stamp from §1) breaks the binding, so re-approve after any edit.
+No flag, no record, no publish. Editing the plan body after the record breaks
+the binding, so re-run teardown and re-approve after any body edit. Stamping
+`Status: APPROVED` after the record does not break it.
 
 ### 6. Publish to the board
 
 Publish only after the quiz is approved AND teardown has passed. Run the gate
-first and stop on a non-zero exit — that command is the only thing that tells
-you approval was recorded:
+first — it checks both: the approval record, and the latest Teardown pass
+carrying this plan's digest. Stop on a non-zero exit; that command is the only
+thing that tells you both were recorded:
 
 ```sh
 python scripts/dvc_tickets.py --tickets T1,T2 check
@@ -170,7 +177,8 @@ Then, only as cards:
   unassigned card is an unfinished publish.
 - Record the returned card id next to its ticket heading in the plan:
   `### T2 <title> — card: t_ab12`. The plan is the one artifact; the id beside
-  the ticket is what lets a later session match board to plan without guessing.
+  the ticket is what lets a later session match board to plan without guessing
+  (bookkeeping: the digest excludes it, so the plan stays APPROVED).
 - Link the milestone card as the parent of the fan-out, or note it in the body
   when the milestone has no card.
 - The card body is the ticket: what to build, acceptance checks, verify command,

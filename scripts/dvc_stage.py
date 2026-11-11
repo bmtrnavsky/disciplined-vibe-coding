@@ -11,14 +11,22 @@ sequence a record a machine can check.
     python scripts/dvc_stage.py --workdir . check            # whole pipeline
     python scripts/dvc_stage.py --workdir . check --before Build
 
-`check` (run by `verify`, before any done-claim) exits 1 on any of:
+`check` (run by `verify`, before any done-claim) reads the log as a sequence
+of loops, one per Define-to-Verify pass, and exits 1 on any of:
 
-1. a stage in STAGES with no PASS or logged BYPASS line — a skipped stage
-   cannot be told from a silent bypass, so it counts as an UNLOGGED BYPASS
-   and is a pipeline defect (SKILL.md, Gate enforcement);
-2. a FAIL line with no later BYPASS line for the same gate;
-3. stages out of order, and in particular a Build line recorded before a
-   Teardown pass — the pre-build review gate the doctrine requires.
+1. a stage in STAGES with no PASS or logged BYPASS line in its loop — a
+   skipped stage cannot be told from a silent bypass, so it counts as an
+   UNLOGGED BYPASS and is a pipeline defect (SKILL.md, Gate enforcement);
+2. a FAIL line that the same gate never clears with a later PASS (the fix)
+   or BYPASS (the waiver);
+3. a step backward that is not rework: rework may step back only right after
+   a FAIL, and a new loop starts with Define right after a Verify pass;
+4. a Build with no Teardown PASS or BYPASS since the last Define, Economy or
+   Plan record — the pre-build review gate the doctrine requires, so a
+   re-plan needs a fresh teardown.
+
+Every PASS is still self-attested: `check` proves a record was written, not
+that the review behind it was good.
 
 A malformed or unknown line is a defect too: the log is an audit trail,
 not advice. `bypass` requires --by and --why, so the tool itself cannot
@@ -27,14 +35,39 @@ and `check` reports every stage it has no line for.
 """
 
 import argparse
+import hashlib
 import json
+import re
 import sys
 import time
 from pathlib import Path
 
 STAGES = ("Define", "Economy", "Plan", "Teardown", "Build", "Verify")
+SPEC_OR_PLAN = ("Define", "Economy", "Plan")
 LOG_REL = ".pipeline/stages.jsonl"
 FORMAT = "dvc-stage-v1"
+
+# The plan digest leaves out exactly two kinds of bookkeeping: the Status
+# line and the card id published on a ticket heading. Both are strictly
+# patterned, so any other edit still changes the digest.
+PLAN_STATUS_RE = re.compile(r"^Status:[ \t]*(?:DRAFT|APPROVED)[ \t]*(?:\n|$)",
+                            re.MULTILINE)
+PLAN_CARD_RE = re.compile(
+    r"^(###[ \t]+T\d+\b.*?)[ \t]+(?:—|--)[ \t]+card:[ \t]*[A-Za-z0-9_-]+[ \t]*$",
+    re.MULTILINE)
+
+
+def plan_digest(path):
+    """sha256 of a plan file with its Status line and card ids left out."""
+    # read_text normalises CRLF to LF, so line endings cannot move the digest.
+    text = Path(path).read_text(encoding="utf-8")
+    text = PLAN_CARD_RE.sub(r"\1", text)
+    text = PLAN_STATUS_RE.sub("", text)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _ix(rec):
+    return STAGES.index(rec["stage"])
 
 
 def _path(workdir):
@@ -49,8 +82,12 @@ def _append(workdir, rec):
     return rec
 
 
-def log(workdir, stage_name, gate, result, reason="", by="", why=""):
-    """Record one stage exit. Returns the record written."""
+def log(workdir, stage_name, gate, result, reason="", by="", why="", plan=None):
+    """Record one stage exit. Returns the record written.
+
+    plan= binds the record to a plan file's digest, which is how a Teardown
+    pass proves it reviewed this plan body (to-tickets check reads it).
+    """
     if stage_name not in STAGES:
         raise SystemExit(f"unknown stage {stage_name!r}; one of {', '.join(STAGES)}")
     if result not in ("PASS", "FAIL", "BYPASS"):
@@ -63,6 +100,13 @@ def log(workdir, stage_name, gate, result, reason="", by="", why=""):
            "reason": reason}
     if by or why:
         rec["by"], rec["why"] = by, why
+    if plan:
+        p = Path(plan)
+        p = p if p.is_absolute() else Path(workdir) / p
+        if not p.is_file():
+            raise SystemExit(f"plan not found: {p}")
+        rec["plan"] = p.name
+        rec["plan_digest"] = plan_digest(p)
     return _append(workdir, rec)
 
 
@@ -82,6 +126,72 @@ def _read(workdir):
             return False, f"stage log line {n} names no real stage: {line.strip()[:60]}"
         records.append(rec)
     return records, None
+
+
+def _loops(records):
+    """Split the log into Define-to-Verify loops. Each loop is a list."""
+    loops = [[]]
+    for rec in records:
+        prev = loops[-1][-1] if loops[-1] else None
+        if (prev is not None and rec["stage"] == "Define"
+                and prev["stage"] == "Verify"
+                and prev.get("result") in ("PASS", "BYPASS")):
+            loops.append([])
+        loops[-1].append(rec)
+    return loops
+
+
+def _check_loop(loop, required, limit=None, before=None):
+    """Return (ok, why) for one loop. The rule order is deliberate."""
+    if limit is not None:
+        fails = [i for i, r in enumerate(loop) if r.get("result") == "FAIL"]
+        tail = loop[fails[-1] + 1:] if fails else loop
+        ahead = [r["stage"] for r in tail if _ix(r) >= limit]
+        if ahead:
+            return False, (f"{ahead[0]} is recorded while checking the stages "
+                           f"before {before}; the gate was not asked before "
+                           "the stage ran")
+
+    for i, r in enumerate(loop):
+        if r["stage"] != "Build":
+            continue
+        j = next((k for k in range(i - 1, -1, -1)
+                  if loop[k]["stage"] in SPEC_OR_PLAN), -1)
+        if not any(loop[k]["stage"] == "Teardown"
+                   and loop[k].get("result") in ("PASS", "BYPASS")
+                   for k in range(j + 1, i)):
+            return False, ("pre-build gate: Build was recorded with no Teardown "
+                           "pass since the last Define/Economy/Plan record; "
+                           "teardown reviews spec and plan before code")
+
+    for k in range(1, len(loop)):
+        if _ix(loop[k]) < _ix(loop[k - 1]) and loop[k - 1].get("result") != "FAIL":
+            return False, (f"stage order defect: {loop[k]['stage']} recorded "
+                           f"after {loop[k - 1]['stage']} with no failed gate "
+                           "before it; rework may step back only right after a "
+                           "FAIL, and a new loop starts with Define after a "
+                           "Verify pass")
+
+    for i, r in enumerate(loop):
+        if r.get("result") != "FAIL":
+            continue
+        if limit is not None and _ix(r) >= limit:
+            continue
+        gate = r.get("gate")
+        if not any(x.get("gate") == gate and x.get("result") in ("PASS", "BYPASS")
+                   for x in loop[i + 1:]):
+            return False, (f"gate {gate} FAILED at {r['stage']} and no later "
+                           "pass or bypass was logged; a failed gate blocks "
+                           "the next stage")
+
+    passed = {r["stage"] for r in loop if r.get("result") in ("PASS", "BYPASS")}
+    missing = [s for s in required if s not in passed]
+    if missing:
+        return False, ("unlogged stage(s)" + (f" before {before}" if before else "")
+                       + ": " + ", ".join(missing)
+                       + " — no PASS or logged bypass, so it reads as an "
+                       "unlogged bypass")
+    return True, None
 
 
 def check(workdir, before=None):
@@ -107,46 +217,54 @@ def check(workdir, before=None):
     if not records:
         return False, "stage log is empty: every stage is unlogged"
 
-    if before is not None:
-        ahead = [r["stage"] for r in records if STAGES.index(r["stage"]) >= limit]
-        if ahead:
-            return False, (f"{ahead[0]} is recorded while checking the stages "
-                           f"before {before}; the gate was not asked before "
-                           "the stage ran")
+    loops = _loops(records)
+    n = len(loops)
+    for num, loop in enumerate(loops[:-1], 1):
+        ok, why = _check_loop(loop, STAGES)
+        if not ok:
+            return False, f"loop {num} of {n}: {why}"
+    ok, why = _check_loop(loops[-1], required, limit if before else None, before)
+    if not ok:
+        return False, (f"loop {n} of {n}: {why}" if n > 1 else why)
 
-    build_at = next((i for i, r in enumerate(records) if r["stage"] == "Build"), None)
-    if build_at is not None and not any(
-            r["stage"] == "Teardown" and r["result"] in ("PASS", "BYPASS")
-            for r in records[:build_at]):
-        return False, ("pre-build gate: Build was recorded before Teardown "
-                       "passed; teardown reviews spec and plan before code")
-
-    idx = [STAGES.index(r["stage"]) for r in records]
-    for a, b in zip(idx, idx[1:]):
-        if b < a:
-            return False, (f"stage order defect: {STAGES[b]} recorded after "
-                           f"{STAGES[a]}; a stage cannot precede its gate")
-
-    for i, r in enumerate(records):
-        if r["result"] != "FAIL":
-            continue
-        gate = r.get("gate")
-        if not any(x["result"] == "BYPASS" and x.get("gate") == gate
-                   for x in records[i + 1:]):
-            return False, (f"gate {gate} FAILED at {r['stage']} and no bypass "
-                           "was logged; a failed gate blocks the next stage")
-
-    passed = {r["stage"] for r in records if r["result"] in ("PASS", "BYPASS")}
-    missing = [s for s in required if s not in passed]
-    if missing:
-        return False, ("unlogged stage(s)" + (f" before {before}" if before else "")
-                       + ": " + ", ".join(missing)
-                       + " — no PASS or logged bypass, so it reads as an "
-                       "unlogged bypass")
-    bypasses = sum(1 for r in records if r["result"] == "BYPASS")
+    bypasses = sum(1 for r in records if r.get("result") == "BYPASS")
     scope = f"before {before}" if before else "whole pipeline"
     return True, (f"{scope}: {len(required)} stage(s) passed or bypassed "
-                  f"({bypasses} logged bypass(es))")
+                  f"({bypasses} logged bypass(es)); {n} loop(s)")
+
+
+def teardown_for_plan(workdir, plan_path):
+    """Return (ok, why): was a Teardown pass recorded against this plan body?
+
+    It proves the pass was logged on this exact plan (digest match), not that
+    the review behind it was good. Only the newest loop counts: an earlier
+    loop's teardown belongs to the previous milestone.
+    """
+    read = _read(workdir)
+    if read is None:
+        return False, "no stage log: teardown was never recorded"
+    records, bad = read
+    if bad:
+        return False, bad
+
+    last_td = None
+    for r in _loops(records)[-1]:
+        if r["stage"] in SPEC_OR_PLAN:
+            last_td = None
+        elif r["stage"] == "Teardown":
+            last_td = r if r.get("result") in ("PASS", "BYPASS") else None
+    if last_td is None:
+        return False, ("no Teardown pass since the last Define/Economy/Plan "
+                       "record in the current loop, or the latest Teardown "
+                       "record is a FAIL")
+    if not last_td.get("plan_digest"):
+        return False, ("the Teardown pass carries no plan digest; log it with "
+                       "--plan <plan file>")
+    d = plan_digest(plan_path)
+    if last_td["plan_digest"] != d:
+        return False, ("plan changed since Teardown passed; re-run teardown "
+                       "and log it with --plan")
+    return True, f"teardown {last_td['result']} on this plan (digest {d[:12]})"
 
 
 def main(argv=None):
@@ -159,6 +277,8 @@ def main(argv=None):
     p.add_argument("--gate", required=True)
     p.add_argument("--result", required=True, choices=("PASS", "FAIL"))
     p.add_argument("--reason", default="")
+    p.add_argument("--plan", default=None,
+                   help="bind this record to a plan file's digest")
 
     p = sub.add_parser("bypass", help="record a user-approved waiver")
     p.add_argument("--stage", required=True)
@@ -166,6 +286,8 @@ def main(argv=None):
     p.add_argument("--by", required=True, help="who approved the waiver")
     p.add_argument("--why", required=True, help="why it was waived")
     p.add_argument("--reason", default="")
+    p.add_argument("--plan", default=None,
+                   help="bind this record to a plan file's digest")
 
     p = sub.add_parser("check", help="fail on a skipped, failed or out-of-order stage")
     p.add_argument("--before", default=None,
@@ -179,7 +301,8 @@ def main(argv=None):
         return 0 if ok else 1
     rec = log(ns.workdir, ns.stage, ns.gate,
               "BYPASS" if ns.cmd == "bypass" else ns.result,
-              ns.reason, getattr(ns, "by", ""), getattr(ns, "why", ""))
+              ns.reason, getattr(ns, "by", ""), getattr(ns, "why", ""),
+              ns.plan)
     print(f"{rec['result']} recorded: {rec['stage']} {rec['gate']}", flush=True)
     return 0
 

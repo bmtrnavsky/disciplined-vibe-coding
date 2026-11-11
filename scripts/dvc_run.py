@@ -42,11 +42,23 @@ builder; G4, G5 and G7 grade work the run did not do. What no machine
 check can evaluate stays labelled ADVISORY in the Verify output (A1-A6),
 with the plain reason why.
 
-Grilled spec (D6): Define writes its micro template only when no grilled
-spec is on disk. A grill round file under `.pipeline/grill/` newer than the
-runner's own template stamp means the spec is the grill's output, so Define
-locks and loads it instead of overwriting. `--overwrite-grilled-spec` is the
-only override and it records a BYPASS in the stage log.
+Grilled spec (D6): Define writes its micro template only when the spec on
+disk is not grill output. The trace is an explicit marker, not a timestamp:
+a `grilled-by: grill-with-docs` line means the grill wrote that spec, so
+Define locks and loads it instead of overwriting. `--overwrite-grilled-spec`
+is the only override and it records a BYPASS in the stage log. A loaded
+spec above micro-spec stops OUT OF SCOPE (exit 5).
+
+Parked grill (N3): the grill's headless rule writes its questions to
+`.pipeline/grill/<slug>-round-N.md` with a `status: open` or
+`status: answered` line (no line counts as open). A run over any round that
+is not answered, or over answered rounds with no grilled spec on disk,
+stops at Define with NEEDS INPUT: no spec is written, nothing is built.
+`--overwrite-grilled-spec` does not override an open round.
+
+Exit codes: 0 SUCCEEDED, 1 FAILED, 2 NOT BUILT, 3 REFUSED (the workdir
+holds a FAILED run; `--fresh` overrides), 4 NEEDS INPUT (a parked grill),
+5 OUT OF SCOPE (the spec's rung is above the runner's ceiling).
 
 Report (card 4/4): every exit — success, FAILED, or NOT BUILT — writes
 `.pipeline/run-report.md` via `dvc_report.py` and prints
@@ -86,7 +98,9 @@ import dvc_stage  # noqa: E402  (the stage log; an operator bypass is recorded t
 
 DEFAULT_SPEC = ".pipeline/to-spec.md"
 GRILL_REL = ".pipeline/grill"
-SPEC_STAMP_RE = re.compile(r"^generated-by: dvc_run\.py (\d+)$", re.MULTILINE)
+GRILL_MARK_RE = re.compile(r"^grilled-by: grill-with-docs[ \t]*$", re.MULTILINE)
+ROUND_STATUS_RE = re.compile(r"^status:[ \t]*([A-Za-z-]+)[ \t]*$",
+                             re.MULTILINE | re.IGNORECASE)
 
 
 def _slug(job):
@@ -105,37 +119,62 @@ def finish(workdir, rec, code):
     return code
 
 
-def _newest_grill_round(workdir):
-    """Newest round file the grill left, or None. Its presence is the trace
-    that a grilled spec exists in this workdir."""
+def _round_files(workdir):
+    """Every round file the grill left, sorted by name; [] if none."""
     grill = workdir / GRILL_REL
     if not grill.is_dir():
-        return None
-    rounds = sorted(grill.glob("*-round-*.md"), key=lambda p: p.stat().st_mtime)
-    return rounds[-1] if rounds else None
+        return []
+    return sorted(grill.glob("*-round-*.md"), key=lambda p: p.name)
 
 
-def _is_grilled(spec, round_file):
-    """True when the spec on disk is grill output, not this runner's template.
+def _round_is_answered(path):
+    """True only when the round's first `status:` line says answered.
 
-    D6: Define used to overwrite whatever sat at .pipeline/to-spec.md, which
-    deletes the interview's only artifact. Every template Define writes
-    carries its own epoch stamp; a round file newer than that stamp — or a
-    spec with no stamp at all — is the grill's work.
+    An unreadable file, a missing status line, or any other value is a
+    round still open: a parked round holds questions, not answers, so
+    the check fails closed.
     """
-    if round_file is None:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    m = ROUND_STATUS_RE.search(text)
+    return bool(m) and m.group(1).lower() == "answered"
+
+
+def _spec_is_grilled(spec):
+    """True when the spec carries the grill's own marker line."""
+    if not spec.is_file():
         return False
     try:
         text = spec.read_text(encoding="utf-8")
     except OSError:
         return False
-    stamp = SPEC_STAMP_RE.search(text)
-    if stamp is None:
-        return True
-    try:
-        return round_file.stat().st_mtime > int(stamp.group(1))
-    except OSError:
-        return False
+    return bool(GRILL_MARK_RE.search(text))
+
+
+def grill_parked(workdir):
+    """None, or one line naming why a parked round stops this run.
+
+    The runner has no LLM in Define, so it cannot interview. It does
+    honor a parked interview: an open round, or answered rounds with no
+    grilled spec on disk, means the grill's work is unfinished.
+    """
+    rounds = _round_files(workdir)
+    if not rounds:
+        return None
+    open_rounds = [p for p in rounds if not _round_is_answered(p)]
+    if open_rounds:
+        names = ", ".join(p.relative_to(workdir).as_posix()
+                          for p in open_rounds)
+        return (f"grill round(s) still open: {names}; answer them in an "
+                "interactive session and set 'status: answered', or remove "
+                "them")
+    if not _spec_is_grilled(workdir / DEFAULT_SPEC):
+        return ("grill rounds are answered but no grilled spec is on disk "
+                "(no 'grilled-by: grill-with-docs' line in "
+                f"{DEFAULT_SPEC}); finish the grill's step 8 interactively")
+    return None
 
 
 def cmd_define(workdir, job, overwrite_grilled=False):
@@ -143,15 +182,12 @@ def cmd_define(workdir, job, overwrite_grilled=False):
     spec_rel = DEFAULT_SPEC
     spec = workdir / spec_rel
     spec.parent.mkdir(parents=True, exist_ok=True)
-    round_file = _newest_grill_round(workdir)
-    grilled = spec.is_file() and _is_grilled(spec, round_file)
+    grilled = _spec_is_grilled(spec)
     if grilled and not overwrite_grilled:
         # The grilled spec is loaded and locked, not replaced: the gates then
         # grade it as the run's spec (a job it does not record still fails G1).
-        where = (f" ({round_file.relative_to(workdir).as_posix()})"
-                 if round_file else "")
-        print(f"spec: grilled spec loaded, not overwritten{where}; "
-              "pass --overwrite-grilled-spec to replace it", flush=True)
+        print("spec: grilled spec loaded, not overwritten (grilled-by line "
+              "found); pass --overwrite-grilled-spec to replace it", flush=True)
     else:
         if grilled:
             # The flag is the only way in, and the bypass is logged (an
@@ -162,7 +198,7 @@ def cmd_define(workdir, job, overwrite_grilled=False):
             print("spec: BYPASS — operator flag replaced a grilled spec; "
                   "logged in .pipeline/stages.jsonl", flush=True)
         spec.write_text(
-            f"# To-spec (micro)\n\nJob: {job}\n\n"
+            f"# To-spec (micro)\n\nJob: {' '.join(job.split())}\n\n"
             "rung: micro-spec, reversible single-file change inside the workdir.\n"
             "Assumptions: defaults taken, no questions asked (autonomous run).\n"
             f"generated-by: dvc_run.py {int(time.time())}\n",
@@ -456,6 +492,20 @@ def main(argv=None):
 
 
 def _run(ns, workdir, rec, t0):
+    # Parked grill (N3): a round file holds questions, not a spec, and the
+    # runner cannot interview. Stop before Define writes anything at all.
+    parked = grill_parked(workdir)
+    if parked:
+        stage("Define")
+        print(f"STOP: NEEDS INPUT — {parked}", flush=True)
+        if ns.overwrite_grilled_spec:
+            print("--overwrite-grilled-spec does not override an open grill "
+                  "round", flush=True)
+        rec["stop"] = {
+            "result": "NEEDS INPUT",
+            "sentence": (f"The run did not start: {parked}. No spec was "
+                         "written and nothing was built.")}
+        return finish(workdir, rec, 4)
     locked_hash = cmd_define(workdir, ns.job, ns.overwrite_grilled_spec)
     if locked_hash is None:
         rec["stop"] = {"result": "FAILED",
@@ -463,6 +513,17 @@ def _run(ns, workdir, rec, t0):
                                    "could not be hashed, so nothing else ran."}
         return finish(workdir, rec, 1)
     rec["locked_hash"] = locked_hash
+    # N8: the runner cannot honor a spec above micro-spec (one micro plan,
+    # a post-build review only). Stop before any gate, plan or build; the
+    # spec on disk is kept as written; this is a result, not a gate.
+    ok, why = dvc_gates.check_runner_rung(workdir)
+    if not ok:
+        print(f"STOP: OUT OF SCOPE — {why}", flush=True)
+        rec["stop"] = {
+            "result": "OUT OF SCOPE",
+            "sentence": (f"The run did not plan or build: {why}. "
+                         "The spec on disk was kept as written.")}
+        return finish(workdir, rec, 5)
     run_id = dvc_goldfish.make_run_id()
     rec["run_id"] = run_id
     print(f"run: {run_id}", flush=True)

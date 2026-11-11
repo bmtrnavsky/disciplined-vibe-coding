@@ -14,12 +14,13 @@ prompts — see `plugins/disciplined-vibe-coding/SKILL.md` and
 `scripts/selfcheck.sh` is LINT-ONLY — its header says so. A green
 selfcheck without a green behavioural run proves nothing.
 
-## Behavior-to-test table (fixes A–G)
+## Behavior-to-test table (fixes A–G and N1–N8)
 
-Every row is covered by `tests/dvc_behavioural.py` (26/26 green; run it
+Every row is covered by `tests/dvc_behavioural.py` (75/75 green; run it
 with `python tests/dvc_behavioural.py`). Fix details live in
 `plugins/disciplined-vibe-coding/CHANGELOG.md` (fixes A–G, SHAs
-b6668c8/75c31a0/adf1718/64841c0/2a6694c/e1146dd/74b6ca9).
+b6668c8/75c31a0/adf1718/64841c0/2a6694c/e1146dd/74b6ca9; the N1–N8 round
+is under `## Unreleased`).
 
 | Built behavior | Test |
 |---|---|
@@ -40,6 +41,37 @@ b6668c8/75c31a0/adf1718/64841c0/2a6694c/e1146dd/74b6ca9).
 | Every stubbed verdict marked STUB (screen, goldfish.json, call record, report) | `test_stub_with_flag_is_marked_stub_everywhere` |
 | Report fields collapsed to one line; forged `Result: SUCCEEDED` cannot lead | `test_forged_job_cannot_lead_with_succeeded` |
 | Mutation sentinels: disabling same-round or neutering the goldfish turns the suite red | `test_same_round_disabled_would_be_caught`, `test_never_object_would_be_caught` |
+| Grill trace is the spec marker, not a timestamp; a grilled spec loads with no round file at all | `test_grilled_by_line_loads_without_any_round_file` |
+| An open grill round stops the run at Define: exit 4, spec bytes unchanged, no Plan, report says NEEDS INPUT | `test_open_round_file_parks_the_run_before_define` |
+| A round file with no `status:` line fails closed as open, and the stop names the file | `test_round_file_without_a_status_line_counts_as_open` |
+| Answered rounds with no grilled spec on disk still stop the run, and the reason names `grilled-by` | `test_answered_round_with_no_grilled_spec_parks_too` |
+| Answered rounds plus a grilled spec get past Define, so the stop is not sticky | `test_answered_round_with_grilled_spec_runs_past_define` |
+| `--overwrite-grilled-spec` does not override an open round | `test_overwrite_flag_does_not_override_an_open_round` |
+| The grill skill's claims about `dvc_run` are asserted against the runner's own text | `test_runner_half_matches_the_code` |
+| Runner ceiling: full-spec stops OUT OF SCOPE before Build (no `out.txt`, no plan, G1 never runs, report says OUT OF SCOPE, a re-run is not refused) | `test_full_spec_stops_out_of_scope_before_build` |
+| Project rung also stops at the ceiling | `test_project_rung_also_stops` |
+| A grilled micro-spec is let through the ceiling (NOT BUILT, exit 2) | `test_grilled_micro_spec_runs` |
+| A template-shaped grilled spec stops at the ceiling, not at G1 with "swapped or hollow" | `test_template_shaped_grilled_spec_stops_out_of_scope_not_g1` |
+| G1 names a missing `Job:` line instead of blaming a swapped spec | `test_missing_job_line_names_itself` |
+| G1 compares the `Job:` line whole: `Job: abcd` does not pass `--job ab` | `test_prefix_job_no_longer_passes` |
+| A multi-line `--job` is written as one line and cannot inject a `rung:` line | `test_multiline_job_is_written_as_one_line` |
+| A fix is a new PASS for the same gate; no bypass needed | `test_fail_then_pass_clears` |
+| A failed Teardown, a re-plan and a second pass is a legal rework loop | `test_teardown_rework_loop` |
+| A second Define after a Verify pass starts a new loop (a second milestone) | `test_two_loops` |
+| A step back with no FAIL before it is an order defect | `test_rewind_without_fail_is_defect` |
+| A re-plan after Build needs a fresh Teardown | `test_replan_after_build_needs_fresh_teardown` |
+| A Build logged during a failed Verify is not "ahead" on the rework check | `test_before_build_during_verify_rework` |
+| A defect in an earlier loop is reported, not hidden by the last loop | `test_closed_loop_defect_is_reported` |
+| `dvc_stage.py check` exit codes for the loop rules | `test_cli_exit_codes` |
+| Publish: approval alone does not publish; a recorded Teardown pass is required | `test_check_fails_without_teardown` |
+| Publish: a Teardown pass with no plan digest refuses | `test_teardown_without_plan_digest_fails` |
+| Publish: a later Teardown FAIL, or a re-plan, voids the pass | `test_failed_or_stale_teardown_fails` |
+| Publish: a plan body edit after teardown refuses | `test_plan_body_edit_after_teardown_fails` |
+| The plan reaches Build APPROVED with card ids written and the gate green | `test_full_lifecycle_closes` |
+| Only an exact `Status: DRAFT` or `Status: APPROVED` line is bookkeeping; a longer Status line is content | `test_status_line_carrying_content_counts` |
+| A body edit after approval still breaks the binding | `test_body_edit_still_breaks_binding` |
+| CRLF line endings do not move the digest | `test_crlf_does_not_change_digest` |
+| A pre-v2 approval record (no digest) still checks by raw plan sha256 | `test_v1_record_still_checks` |
 
 ## Accepted risks (not fixed, with revisit dates)
 
