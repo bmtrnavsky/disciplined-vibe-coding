@@ -4,7 +4,7 @@
 
 The gates now tell the truth about what they prove, and the Define-to-Verify
 log can record an honest fix without a waiver. Covered by
-`tests/dvc_behavioural.py` (75/75); `scripts/selfcheck.sh` passes 56/56 but is
+`tests/dvc_behavioural.py` (88/88); `scripts/selfcheck.sh` passes 56/56 but is
 lint only and proves nothing on its own.
 
 Two changes bite on a workdir that already exists. An old grilled spec with no
@@ -52,6 +52,30 @@ Define with NEEDS INPUT (exit 4) until the round is answered or removed.
   plan reaches Build APPROVED with the gate green; any other body edit still
   fails. New records are `dvc-tickets-v2`; v1 records carry no digest and keep
   checking against the raw plan sha256.
+- Fixed: grill rounds are per job (N14) — the runner parks only on rounds named
+  for its own `--job` slug (`lowercase`, non-alphanumerics to `-`, 30 chars).
+  A round filed under another job is noted and ignored, so a leftover file can
+  no longer park every run in the workdir. The grill skill states the slug rule
+  so an interactive session files its round where the runner looks.
+- Fixed: round status lines (N16) — a round counts as answered only when it
+  carries exactly one `status:` line and that line says `answered`. A second
+  status line fails closed as open and the stop names how many it saw, instead
+  of trusting the first one.
+- Fixed: stage-loop FAIL clearing (N15) — a FAIL clears only on a later PASS or
+  BYPASS for the same gate at the same stage. A PASS logged under another stage
+  (Define clearing a Plan FAIL) no longer counts, and the check names the stage
+  it wants. A fix logged under a different stage is now refused; that is the
+  intent.
+- Fixed: G3 plan shape (N7) — G3 matches section headings whole and reads their
+  bodies, so "Planning microservices", "Stepsister", empty sections and
+  template slots all fail, and the reason names the missing or empty section. A
+  well-shaped sibling still masks a junk plan file: G3 returns on the first
+  good file in `.pipeline/plans/` and that aggregation is unchanged, because
+  older workdirs hold ticket files the stricter reading would fail.
+- Fixed: grill skill handoff (N4) — step 8 now says where
+  `grilled-by: grill-with-docs` goes (its own line under the title) and that the
+  answered round's single status line must become `status: answered`, the flip
+  that lets the next run past Define.
 
 ## 0.3.2 - 2026-11-10
 
@@ -89,7 +113,11 @@ its own.
   approval was recorded. Headless runs draft under `.pipeline/tickets/` and
   stop.
 - Fixed (e77ee1b): G3 grades real plan shape, so a junk ticket file FAILS and
-  a real ticketed plan PASSES, instead of a word match. Self-check gates stop
+  a real ticketed plan PASSES, instead of a word match. (Corrected in the
+  Unreleased round: G3 now also matches headings whole and reads section
+  bodies, so a heading prefix like "Planning microservices" no longer passes.
+  It still accepts a plan when any file in `.pipeline/plans/` is well shaped,
+  so a junk sibling beside a good plan stays masked.) Self-check gates stop
   claiming more than they check; the shipped `to-tickets` contradictions are
   resolved.
 - Fixed (88b773d): pre-build gate — `scripts/dvc_stage.py` records a Teardown

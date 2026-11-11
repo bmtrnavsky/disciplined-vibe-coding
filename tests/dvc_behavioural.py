@@ -394,6 +394,76 @@ class TestGates(unittest.TestCase):
             self.assertIn("Result: FAILED", text)
 
 
+class TestPlanShape(unittest.TestCase):
+    """N7: G3 grades headings whole and reads section bodies, so a junk
+    heading or a template slot is not a plan."""
+
+    FILLED = (
+        "# Plan\n\n"
+        "## Steps\n\n"
+        "1. Edit `scripts/x.py`; output: a diff; check: the suite is green.\n\n"
+        "## Files touched\n\n"
+        "- scripts/x.py\n\n"
+        "## Verify criteria\n\n"
+        "- `python tests/dvc_behavioural.py` exits 0.\n\n"
+        "## Rollback\n\n"
+        "- `git restore scripts/x.py`; fully reversible.\n")
+
+    def _shape(self, text):
+        with fresh_workdir() as work:
+            plans = work / ".pipeline" / "plans"
+            plans.mkdir(parents=True, exist_ok=True)
+            (plans / "01-x.md").write_text(text, encoding="utf-8")
+            return dvc_gates.check_plan_shaped(work)
+
+    def test_prefix_heading_is_not_a_micro_plan(self):
+        ok, why = self._shape("# Planning microservices\n\n- a real bullet\n")
+        self.assertFalse(ok, why)
+
+    def test_empty_micro_plan_heading_fails(self):
+        ok, why = self._shape("# Plan (micro)\n")
+        self.assertFalse(ok, why)
+
+    def test_stepsister_heading_is_not_steps(self):
+        ok, why = self._shape(
+            "# Plan\n\n## Stepsister\n\n1. one\n\n## Files touched\n\n- x.py\n\n"
+            "## Verify criteria\n\n- the suite is green\n\n"
+            "## Rollback\n\n- git restore x.py\n")
+        self.assertFalse(ok, why)
+        self.assertIn("steps", why)
+
+    def test_all_headings_empty_fails(self):
+        ok, why = self._shape("# Plan\n\n## Steps\n\n## Files touched\n\n"
+                              "## Verify criteria\n\n## Rollback\n")
+        self.assertFalse(ok, why)
+
+    def test_template_slots_only_fail(self):
+        text = (ROOT / "plugins" / "disciplined-vibe-coding" / "templates"
+                / "writing-plan.md").read_text(encoding="utf-8")
+        ok, why = self._shape(text)
+        self.assertFalse(ok, why)
+
+    def test_purpose_only_section_fails(self):
+        ok, why = self._shape(
+            "# Plan\n\n## Steps\n\nPurpose: each step names its file.\n\n"
+            "## Files touched\n\n- x.py\n\n## Verify criteria\n\n"
+            "- the suite is green\n\n## Rollback\n\n- git restore x.py\n")
+        self.assertFalse(ok, why)
+        self.assertIn("empty steps", why)
+
+    def test_runner_micro_plan_passes(self):
+        ok, why = self._shape(
+            "# Plan (micro: 3 bullets)\n\n"
+            "- Build exactly the to-spec, nothing more.\n"
+            "- Prove it with one local check.\n"
+            "- Verify against the spec; note drift, never block on it.\n")
+        self.assertTrue(ok, why)
+
+    def test_filled_full_plan_passes(self):
+        ok, why = self._shape(self.FILLED)
+        self.assertTrue(ok, why)
+
+
 class TestG1JobLine(unittest.TestCase):
     """N1: G1 parses the Job line, and the ceiling stops full-spec first."""
 
@@ -790,6 +860,16 @@ class TestStageLoops(unittest.TestCase):
             self.assertFalse(ok)
             self.assertIn("loop 1 of 2", why)
 
+    def test_pass_at_wrong_stage_does_not_clear(self):
+        """N15: only a PASS at the same stage clears that stage's FAIL."""
+        rows = (("Define",), ("Economy",), ("Plan", "G3", "FAIL"),
+                ("Define", "G3", "PASS"), ("Plan",), ("Teardown",),
+                ("Build",), ("Verify",))
+        with fresh_workdir() as work:
+            ok, why = self._check(work, rows)
+            self.assertFalse(ok)
+            self.assertIn("no later PASS at Plan", why)
+
     def test_cli_exit_codes(self):
         for rows, code in ((self.REWORK, 0), (self.REWIND, 1)):
             with fresh_workdir() as work:
@@ -1047,6 +1127,19 @@ class TestGrillSkillContract(unittest.TestCase):
         for literal in ("grilled-by: grill-with-docs", "status"):
             self.assertIn(literal, runner)
 
+    def test_step_8_says_where_the_marker_and_the_answer_go(self):
+        """N4: the marker's place, and the status flip that un-parks a run."""
+        self.assertIn("on its own line under the title", self.low)
+        self.assertIn("single status line to", self.low)
+        self.assertIn("`status: answered`", self.text)
+        self.assertIn("starting at column 0", self.low)
+
+    def test_round_file_slug_is_the_runners_own(self):
+        """N14: the slug rule and the per-job read are stated for the reader."""
+        self.assertIn("job slug", self.low)
+        self.assertIn("reads only", self.low)
+        self.assertIn("rounds for its own `--job`", self.low)
+
 
 class TestGrilledSpecSurvivesDefine(unittest.TestCase):
     """D6: a headless Define must not silently destroy the grill's spec."""
@@ -1057,7 +1150,7 @@ class TestGrilledSpecSurvivesDefine(unittest.TestCase):
             GRILLED_SPEC.format(job=job), encoding="utf-8")
         grill = work / ".pipeline" / "grill"
         grill.mkdir(parents=True, exist_ok=True)
-        (grill / "probe-round-1.md").write_text(
+        (grill / f"{dvc_run._slug(job)}-round-1.md").write_text(
             "# Round 1\n\nstatus: answered\n\n"
             "1. What does the term mean? (recommended: A)\n",
             encoding="utf-8")
@@ -1125,10 +1218,12 @@ class TestGrilledSpecSurvivesDefine(unittest.TestCase):
     # --- N3: a parked grill round stops the run before Define writes ---
 
     def park_round(self, work, text="# Round 1\n\n1. What does X mean?\n",
-                   name="probe-round-1.md"):
+                   name=None, job="behavioural probe"):
+        """Write a round file for this job's slug (or an explicit name)."""
         grill = work / ".pipeline" / "grill"
         grill.mkdir(parents=True, exist_ok=True)
-        (grill / name).write_text(text, encoding="utf-8")
+        (grill / (name or f"{dvc_run._slug(job)}-round-1.md")).write_text(
+            text, encoding="utf-8")
 
     def test_open_round_file_parks_the_run_before_define(self):
         """A round still open is a park, not a spec: exit 4, spec untouched."""
@@ -1150,7 +1245,27 @@ class TestGrilledSpecSurvivesDefine(unittest.TestCase):
             self.park_round(work)
             code, out, _ = run_job(work)
             self.assertEqual(code, 4, out)
-            self.assertIn("probe-round-1.md", out)
+            self.assertIn("behavioural-probe-round-1.md", out)
+
+    def test_foreign_job_round_does_not_park(self):
+        """N14: another job's round is noted and ignored, never a park."""
+        with fresh_workdir() as work:
+            self.park_round(work, "# Round 1\n\nstatus: open\n",
+                            name="other-job-round-1.md")
+            code, out, _ = run_job(work)  # job "behavioural probe"
+            self.assertEqual(code, 2, out)  # past Define, no build command
+            self.assertIn("[Plan]", out)
+            self.assertIn("ignored", out)
+            self.assertIn("other-job-round-1.md", out)
+
+    def test_two_status_lines_count_as_open(self):
+        """N16: a second status line fails closed and the stop names it."""
+        with fresh_workdir() as work:
+            self.park_round(work,
+                            "# Round 1\n\nstatus: answered\nstatus: open\n")
+            code, out, _ = run_job(work)
+            self.assertEqual(code, 4, out)
+            self.assertIn("status lines", out)
 
     def test_answered_round_with_no_grilled_spec_parks_too(self):
         with fresh_workdir() as work:

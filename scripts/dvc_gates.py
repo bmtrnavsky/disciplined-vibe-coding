@@ -216,18 +216,68 @@ def check_runner_rung(workdir):
                    "(full plan, five-round pre-build teardown, plan approval)")
 
 
+# A micro plan's title: "# Plan (micro)" and variants. The prefix alone is
+# not a shape ("# Planning microservices" is a different plan entirely).
+MICRO_HEAD_RE = re.compile(r"^plan\b.*\bmicro\b", re.IGNORECASE)
+BULLET_RE = re.compile(r"^([-*]|\d+\.)\s+")
+
+
+def _sections(text):
+    """[(heading text, body lines)] for each heading, lower-cased, no '#'."""
+    sections = []
+    for ln in text.splitlines():
+        if ln.lstrip().startswith("#"):
+            sections.append([ln.lstrip("#").strip().lower(), []])
+        elif sections:
+            sections[-1][1].append(ln)
+    return sections
+
+
+def _body_text(line):
+    """True for a section body line that carries plan content.
+
+    Blank lines, the template's `Purpose:` prose, and its bare "-" and
+    "1. ..." slots are shape, not content.
+    """
+    s = line.strip()
+    if not s or s.lower().startswith("purpose:"):
+        return False
+    return bool(BULLET_RE.sub("", s).strip(" .-"))
+
+
+def _bullet(line):
+    """True for a bullet or numbered line that names something."""
+    return bool(BULLET_RE.match(line.strip())) and _body_text(line)
+
+
 def _plan_shape(text):
-    """(ok, why) for the two shapes the docs allow. See PLAN_SECTIONS."""
-    heads = [ln.lstrip("#").strip().lower()
-             for ln in text.splitlines() if ln.lstrip().startswith("#")]
-    have = {s for s in PLAN_SECTIONS
-            if any(h.startswith(s) for h in heads)}
-    if have == set(PLAN_SECTIONS):
+    """(ok, why) for the two shapes the docs allow. See PLAN_SECTIONS.
+
+    Headings match whole, so "Planning microservices" and "Stepsister" are
+    not plans; every full-shape section also needs a body line that is not
+    a template slot. Which one failed is always named.
+    """
+    sections = _sections(text)
+    found = {}
+    for head, body in sections:
+        for name in PLAN_SECTIONS:
+            if name not in found and (head == name
+                                      or head.startswith(name + " ")):
+                found[name] = body
+    missing = [s for s in PLAN_SECTIONS if s not in found]
+    empty = [s for s in PLAN_SECTIONS
+             if s in found and not any(_body_text(ln) for ln in found[s])]
+    if not missing and not empty:
         return True, "full plan shape (Steps/Files touched/Verify/Rollback)"
-    if any(h.startswith("plan") and "micro" in h for h in heads):
+    micro = [body for head, body in sections if MICRO_HEAD_RE.match(head)]
+    if micro and any(_bullet(ln) for body in micro for ln in body):
         return True, "micro plan shape (# Plan ... micro)"
-    missing = ", ".join(s for s in PLAN_SECTIONS if s not in have)
-    return False, f"not a plan: no shape headings ({missing}) and no micro plan heading"
+    micro_why = ("micro plan heading with no bullet steps" if micro
+                 else "no micro plan heading")
+    gaps = [f"missing {', '.join(missing)}"] if missing else []
+    if empty:
+        gaps.append(f"empty {', '.join(empty)}")
+    return False, f"not a plan: {'; '.join(gaps)} ({micro_why})"
 
 
 def check_plan_shaped(workdir):

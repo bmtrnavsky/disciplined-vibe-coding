@@ -16,7 +16,7 @@ selfcheck without a green behavioural run proves nothing.
 
 ## Behavior-to-test table (fixes A–G and N1–N8)
 
-Every row is covered by `tests/dvc_behavioural.py` (75/75 green; run it
+Every row is covered by `tests/dvc_behavioural.py` (88/88 green; run it
 with `python tests/dvc_behavioural.py`). Fix details live in
 `plugins/disciplined-vibe-coding/CHANGELOG.md` (fixes A–G, SHAs
 b6668c8/75c31a0/adf1718/64841c0/2a6694c/e1146dd/74b6ca9; the N1–N8 round
@@ -55,7 +55,7 @@ is under `## Unreleased`).
 | G1 names a missing `Job:` line instead of blaming a swapped spec | `test_missing_job_line_names_itself` |
 | G1 compares the `Job:` line whole: `Job: abcd` does not pass `--job ab` | `test_prefix_job_no_longer_passes` |
 | A multi-line `--job` is written as one line and cannot inject a `rung:` line | `test_multiline_job_is_written_as_one_line` |
-| A fix is a new PASS for the same gate; no bypass needed | `test_fail_then_pass_clears` |
+| A fix is a new PASS for the same gate at the same stage; no bypass needed | `test_fail_then_pass_clears`, `test_pass_at_wrong_stage_does_not_clear` |
 | A failed Teardown, a re-plan and a second pass is a legal rework loop | `test_teardown_rework_loop` |
 | A second Define after a Verify pass starts a new loop (a second milestone) | `test_two_loops` |
 | A step back with no FAIL before it is an order defect | `test_rewind_without_fail_is_defect` |
@@ -72,6 +72,11 @@ is under `## Unreleased`).
 | A body edit after approval still breaks the binding | `test_body_edit_still_breaks_binding` |
 | CRLF line endings do not move the digest | `test_crlf_does_not_change_digest` |
 | A pre-v2 approval record (no digest) still checks by raw plan sha256 | `test_v1_record_still_checks` |
+| A grill round filed under another job's slug is noted and ignored, not a park | `test_foreign_job_round_does_not_park` |
+| A round with two status lines counts as open, and the stop names the count | `test_two_status_lines_count_as_open` |
+| The grill skill says where `grilled-by` goes and that the answered round flips its status line | `test_step_8_says_where_the_marker_and_the_answer_go` |
+| The grill skill states the job-slug rule and that a run reads only its own rounds | `test_round_file_slug_is_the_runners_own` |
+| G3 rejects prefix headings, empty sections and template slots; the runner's micro plan and a filled full plan pass | `test_prefix_heading_is_not_a_micro_plan`, `test_empty_micro_plan_heading_fails`, `test_stepsister_heading_is_not_steps`, `test_all_headings_empty_fails`, `test_template_slots_only_fail`, `test_purpose_only_section_fails`, `test_runner_micro_plan_passes`, `test_filled_full_plan_passes` |
 
 ## Accepted risks (not fixed, with revisit dates)
 

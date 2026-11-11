@@ -89,10 +89,12 @@ Headless changes the shape: skip steps 3, 4 and the step-8 quiz, and go to
    settled words into the goal and scope, the decisions into `Decisions`,
    anything still open into `Open questions` as a stated assumption — a named
    assumption only where the unanswered question still matters, otherwise the
-   round's recommendation stands. `grilled-by: grill-with-docs` goes in the
-   spec when the marker is absent: it is the line `dvc_run.py` loads the spec
-   by, and without it the run parks again over answered rounds. Hand to `plan`
-   when done. This skill never plans and never builds.
+   round's recommendation stands. Then leave the runner what it loads by: put
+   `grilled-by: grill-with-docs` on its own line under the title, when the
+   marker is absent, and set the answered round's single status line to
+   `status: answered`, starting at column 0. A round left `status: open` parks
+   the next run again. Hand to `plan` when done. This skill never plans and
+   never builds.
 
 ## Where no human can answer
 
@@ -105,7 +107,9 @@ nobody made.
   `.pipeline/grill/<slug>-round-N.md`: the numbered questions, each with a
   recommendation, plus the read list. One file per round, and that file
   carries exactly one `status: open` line — one line for the round, never a
-  status line per question.
+  status line per question. `<slug>` is `dvc_run`'s job slug: lowercased,
+  non-alphanumerics become `-`, cut to 30 characters. The runner reads only
+  the rounds for its own `--job`; another job's rounds are noted and ignored.
 - **A Kanban worker** states plainly that the interview did not finish, names
   the round file, and parks its card: `kanban_block(kind="needs_input")`.
 - **`dvc_run.py` writes no round file**, and no file of its own here. It has

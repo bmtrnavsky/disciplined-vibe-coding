@@ -17,8 +17,8 @@ of loops, one per Define-to-Verify pass, and exits 1 on any of:
 1. a stage in STAGES with no PASS or logged BYPASS line in its loop — a
    skipped stage cannot be told from a silent bypass, so it counts as an
    UNLOGGED BYPASS and is a pipeline defect (SKILL.md, Gate enforcement);
-2. a FAIL line that the same gate never clears with a later PASS (the fix)
-   or BYPASS (the waiver);
+2. a FAIL line that the same gate at the same stage never clears with a
+   later PASS (the fix) or BYPASS (the waiver);
 3. a step backward that is not rework: rework may step back only right after
    a FAIL, and a new loop starts with Define right after a Verify pass;
 4. a Build with no Teardown PASS or BYPASS since the last Define, Economy or
@@ -178,11 +178,12 @@ def _check_loop(loop, required, limit=None, before=None):
         if limit is not None and _ix(r) >= limit:
             continue
         gate = r.get("gate")
-        if not any(x.get("gate") == gate and x.get("result") in ("PASS", "BYPASS")
+        if not any(x.get("gate") == gate and x.get("stage") == r["stage"]
+                   and x.get("result") in ("PASS", "BYPASS")
                    for x in loop[i + 1:]):
             return False, (f"gate {gate} FAILED at {r['stage']} and no later "
-                           "pass or bypass was logged; a failed gate blocks "
-                           "the next stage")
+                           f"PASS at {r['stage']}; a failed gate blocks the "
+                           "next stage")
 
     passed = {r["stage"] for r in loop if r.get("result") in ("PASS", "BYPASS")}
     missing = [s for s in required if s not in passed]

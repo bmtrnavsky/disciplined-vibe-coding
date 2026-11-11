@@ -54,9 +54,10 @@ PASS/FAIL, one-line reason), `scripts/dvc_stage.py bypass --by NAME
 --why REASON` records a waiver — both flags required, so the tool
 cannot write an unlogged bypass — and `scripts/dvc_stage.py check`
 fails on a missing stage record, a FAIL with no later bypass, or a
-Build recorded before a Teardown pass. A FAIL clears when the same gate
-later logs PASS (the fix) or BYPASS (the waiver). Rework steps back only
-right after a FAIL. A re-plan needs a fresh Teardown pass before Build.
+Build recorded before a Teardown pass. A FAIL clears when the same gate at
+the same stage later logs PASS (the fix) or BYPASS (the waiver). Rework
+steps back only right after a FAIL. A re-plan needs a fresh Teardown pass
+before Build.
 A new milestone is a new loop: Define after a Verify pass. `verify` runs
 that check before any done-claim. A stage with no record at all cannot be
 told from a silent bypass, so it counts as one: that is the defect the

@@ -119,27 +119,38 @@ def finish(workdir, rec, code):
     return code
 
 
-def _round_files(workdir):
-    """Every round file the grill left, sorted by name; [] if none."""
+def _round_files(workdir, job=None):
+    """Round files the grill left for this job, sorted by name.
+
+    A run reads only its own rounds (`<slug>-round-*.md`); job=None
+    returns every round file, which is how the runner spots another
+    job's leftovers.
+    """
     grill = workdir / GRILL_REL
     if not grill.is_dir():
         return []
-    return sorted(grill.glob("*-round-*.md"), key=lambda p: p.name)
+    pattern = f"{_slug(job)}-round-*.md" if job is not None else "*-round-*.md"
+    return sorted(grill.glob(pattern), key=lambda p: p.name)
 
 
-def _round_is_answered(path):
-    """True only when the round's first `status:` line says answered.
-
-    An unreadable file, a missing status line, or any other value is a
-    round still open: a parked round holds questions, not answers, so
-    the check fails closed.
-    """
+def _round_statuses(path):
+    """The round's `status:` values in file order; [] if unreadable."""
     try:
         text = path.read_text(encoding="utf-8")
     except OSError:
-        return False
-    m = ROUND_STATUS_RE.search(text)
-    return bool(m) and m.group(1).lower() == "answered"
+        return []
+    return ROUND_STATUS_RE.findall(text)
+
+
+def _round_is_answered(path):
+    """True only when the round has exactly one `status:` line: answered.
+
+    Zero lines, several lines, an unreadable file, or any other value is
+    a round still open: a parked round holds questions, not answers, so
+    the check fails closed.
+    """
+    statuses = _round_statuses(path)
+    return len(statuses) == 1 and statuses[0].lower() == "answered"
 
 
 def _spec_is_grilled(spec):
@@ -153,23 +164,33 @@ def _spec_is_grilled(spec):
     return bool(GRILL_MARK_RE.search(text))
 
 
-def grill_parked(workdir):
+def grill_parked(workdir, job):
     """None, or one line naming why a parked round stops this run.
 
     The runner has no LLM in Define, so it cannot interview. It does
-    honor a parked interview: an open round, or answered rounds with no
-    grilled spec on disk, means the grill's work is unfinished.
+    honor a parked interview for its own --job: an open round, or
+    answered rounds with no grilled spec on disk, means the grill's work
+    is unfinished. Rounds filed under another job's slug are noted and
+    ignored.
     """
-    rounds = _round_files(workdir)
+    rounds = _round_files(workdir, job)
     if not rounds:
+        others = _round_files(workdir)
+        if others:
+            print("note: grill rounds for other jobs ignored: "
+                  + ", ".join(p.name for p in others), flush=True)
         return None
     open_rounds = [p for p in rounds if not _round_is_answered(p)]
     if open_rounds:
-        names = ", ".join(p.relative_to(workdir).as_posix()
-                          for p in open_rounds)
-        return (f"grill round(s) still open: {names}; answer them in an "
-                "interactive session and set 'status: answered', or remove "
-                "them")
+        names = []
+        for p in open_rounds:
+            rel = p.relative_to(workdir).as_posix()
+            count = len(_round_statuses(p))
+            names.append(f"{rel}: {count} status lines, expected one"
+                         if count > 1 else rel)
+        return (f"grill round(s) still open: {', '.join(names)}; answer them "
+                "in an interactive session and set 'status: answered', or "
+                "remove them")
     if not _spec_is_grilled(workdir / DEFAULT_SPEC):
         return ("grill rounds are answered but no grilled spec is on disk "
                 "(no 'grilled-by: grill-with-docs' line in "
@@ -494,7 +515,7 @@ def main(argv=None):
 def _run(ns, workdir, rec, t0):
     # Parked grill (N3): a round file holds questions, not a spec, and the
     # runner cannot interview. Stop before Define writes anything at all.
-    parked = grill_parked(workdir)
+    parked = grill_parked(workdir, ns.job)
     if parked:
         stage("Define")
         print(f"STOP: NEEDS INPUT — {parked}", flush=True)
