@@ -14,7 +14,7 @@ description: Define/Plan/Build/Verify pipeline with five folded-in practices, fo
 maintainer: bmtrnavsky
 tier: community
 category: general
-version: "0.3.2"
+version: "0.3.3"
 docs_url: https://github.com/bmtrnavsky/disciplined-vibe-coding#readme
 readme: true
 capabilities:

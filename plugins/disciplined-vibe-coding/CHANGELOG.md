@@ -1,11 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.3.3 - 2026-11-11
 
-The gates now tell the truth about what they prove, and the Define-to-Verify
-log can record an honest fix without a waiver. Covered by
-`tests/dvc_behavioural.py` (88/88); `scripts/selfcheck.sh` passes 56/56 but is
-lint only and proves nothing on its own.
+The gates now tell the truth about what they prove, and every request gets a
+verdict before it is interviewed. Shipped in a09b940 (gates, runner, skill
+text) and eb2858d (triage). Covered by `tests/dvc_behavioural.py` (88/88);
+`scripts/selfcheck.sh` passes 56/56 but is lint only and proves nothing on its
+own.
 
 Two changes bite on a workdir that already exists. An old grilled spec with no
 `grilled-by: grill-with-docs` line is no longer recognised, so Define
@@ -13,6 +14,17 @@ overwrites it — the old detector (a round file newer than the runner's stamp)
 missed every interactive grill, so that spec was never protected. And an old
 grill round file with no `status:` line now reads as open, so the run stops at
 Define with NEEDS INPUT (exit 4) until the round is answered or removed.
+
+- Added: `triage` — one verdict per ask, written down, before any interview.
+  `proceed` writes the brief; `already built` names where the behavior lives
+  and is never filed as a rejection; `out of scope` appends the request to
+  `.out-of-scope/<concept>.md`; `needs info` writes the question file. A
+  deferral is not a verdict and leaves no file behind. It fires at micro-spec
+  and above on a request for work with no verdict yet, and refuses on the
+  one-liner rung, on asks that are questions or reviews, on work already
+  approved and in flight, and on asks it already triaged this session.
+- Changed: `intake` step 1 hands to `triage` at micro-spec and above, before
+  the interview; the verdict comes back, then the interview runs.
 
 - Fixed: grill trace (N3) — the mtime guess is deleted. The spec carries
   `grilled-by: grill-with-docs`; each round carries `status: open` or
