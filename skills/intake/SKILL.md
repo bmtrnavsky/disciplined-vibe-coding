@@ -32,6 +32,9 @@ above: full interview, then hand the questions to `grill-with-docs` — it is
 the interview's teeth at that rung. Destructive data work always interviews,
 whatever the rung.
 
+At micro-spec and above, step 1 hands to `triage` before the interview; the
+verdict comes back, then the interview runs.
+
 ## Cognitive traps
 - "Big ask = big build" — ask learning-vs-tool before scaping weeks of work (X5 finding).
 - "The request is obvious" — confirm the goal, not the mechanism.
