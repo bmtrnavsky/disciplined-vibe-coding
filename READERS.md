@@ -30,7 +30,9 @@ SOUL.md         persona (optional; or fold its rules into your system prompt)
 Teardown scales by rung (see the pipeline `SKILL.md` Teardown stage): at
 micro-spec, two passes — consequence, then alternatives. At full-spec and
 above, all five rounds in order — initial zoom-out, comprehension, design
-critique, intermediate zoom-out, implementation readiness. Drift is the
+critique, intermediate zoom-out, implementation readiness. Each round is
+its own zero-context read: one reviewer call per round, no round sees
+another round's verdict, and every round must pass on its own. Drift is the
 post-build check: spec versus shipped code, divergences only, "no drift"
 when they match.
 

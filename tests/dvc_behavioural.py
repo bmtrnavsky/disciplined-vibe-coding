@@ -13,8 +13,9 @@ rule or the goldfish's ability to object in a copy, and the suite FAILS.
 
 One exception to the no-string-matching rule: the grill's firing rules (D3)
 are prose in a skill file, so TestGrillSkillContract reads that file as text —
-the only machine-readable form a trigger list has. Everything else here runs
-the runner.
+the only machine-readable form a trigger list has. TestGoldfishDoctrineContract
+does the same for the two independence rules (a separate zero-context worker,
+one reviewer call per round). Everything else here runs the runner.
 
 Run:  python tests/dvc_behavioural.py
 """
@@ -133,7 +134,7 @@ GENUINE_BUILD = (
 class TestStopRules(unittest.TestCase):
     def test_same_round_stops_at_two(self):
         """Two straight failures on one round: no third attempt, exit 1."""
-        with fresh_workdir() as work, stub_env("F,F,F,F"):
+        with fresh_workdir() as work, stub_env("F,F"):
             code, out, text = run_job(work, PASS_BUILD)
             self.assertEqual(code, 1)
             self.assertIn("same-round", out)
@@ -142,15 +143,54 @@ class TestStopRules(unittest.TestCase):
             st = goldfish_state(work)
             self.assertEqual(st["outcome"]["rule"], "same-round")
             self.assertEqual(st["per_round"]["consequence"]["attempts"], 2)
+            calls = list((work / ".pipeline" / "reviews" / "goldfish"
+                          ).glob("call-*.json"))
+            self.assertEqual(len(calls), 4,
+                             "2 attempts x 1 call per round = 4 call records")
 
     def test_total_cap_stops_the_loop(self):
-        """Failures spread across rounds still stop the run as FAILED."""
-        with fresh_workdir() as work, stub_env("F,P,F,P,F"):
+        """Failures spread across rounds trip the cap, not the same-round rule.
+
+        F,P then P,F then F,P: each round fails once, recovers, then the
+        earlier round fails again. Nothing fails twice in a row, so only the
+        total-cap rule (R+1 = 3) can stop this run.
+        """
+        with fresh_workdir() as work, stub_env("F,P;P,F;F,P"):
             code, out, text = run_job(work, PASS_BUILD)
-            self.assertEqual(code, 1)
+            self.assertEqual(code, 1, out)
             self.assertIn("Result: FAILED", text)
+            self.assertIn("total failure cap", out)
+            self.assertNotIn("same-round", out)
             st = goldfish_state(work)
-            self.assertEqual(st["outcome"]["result"], "FAIL")
+            self.assertEqual(st["outcome"]["rule"], "total-cap")
+            self.assertEqual(st["total_failures"], 3)
+            self.assertEqual(st["per_round"]["consequence"]["attempts"], 3)
+            self.assertEqual(st["per_round"]["alternatives"]["attempts"], 3)
+            calls = list((work / ".pipeline" / "reviews" / "goldfish"
+                          ).glob("call-*.json"))
+            self.assertEqual(len(calls), 6,
+                             "3 iterations x 1 call per round = 6 records")
+
+    def test_fail_then_recover_passes(self):
+        """F,F then P,P: answering the objections clears both rounds."""
+        with fresh_workdir() as work, stub_env("F,F;P,P"):
+            code, out, _ = run_job(work, PASS_BUILD)
+            self.assertEqual(code, 0, out)
+            st = goldfish_state(work)
+            self.assertEqual(st["outcome"]["result"], "PASS")
+            self.assertEqual(st["total_failures"], 2)
+            self.assertEqual(st["per_round"]["consequence"]["fails_consec"], 0,
+                             "a pass must reset the consecutive count")
+            self.assertIn("2 objection(s) answered", out)
+            calls = [json.loads(p.read_text(encoding="utf-8"))
+                     for p in sorted((work / ".pipeline" / "reviews"
+                                      / "goldfish").glob("call-*.json"))]
+            self.assertEqual(len(calls), 4,
+                             "2 iterations x 1 call per round = 4 records")
+            self.assertEqual([c["results"][c["round"]]["verdict"]
+                              for c in calls], ["fail", "fail", "pass", "pass"])
+            # The FAIL path keeps one record per round on the same bytes.
+            self.assertEqual(calls[0]["packet_hash"], calls[1]["packet_hash"])
 
     def test_failure_count_survives_spec_amendment(self):
         """Amending + re-locking the spec mid-run cannot reset the count."""
@@ -559,6 +599,59 @@ class TestFixAReviewer(unittest.TestCase):
             self.assertIn("Result: SUCCEEDED", text)
 
 
+class TestPerRoundIndependence(unittest.TestCase):
+    """C1: one model call per round, all must pass, no round sees another.
+
+    The pre-C1 runner asked every round in ONE call, so a single completion
+    carried all the verdicts: that is where one round could cover for
+    another. Each round now gets its own zero-context call.
+    """
+
+    def calls(self, work):
+        base = work / ".pipeline" / "reviews" / "goldfish"
+        return [json.loads(p.read_text(encoding="utf-8"))
+                for p in sorted(base.glob("call-*.json"))]
+
+    def test_clean_run_makes_exactly_one_call_per_round(self):
+        """A passing micro run leaves 2 call records: one per round."""
+        with fresh_workdir() as work, stub_env("P,P"):
+            code, out, _ = run_job(work, PASS_BUILD)
+            self.assertEqual(code, 0, out)
+            calls = self.calls(work)
+            self.assertEqual(len(calls), 2, out)
+            self.assertEqual([c["round"] for c in calls], list(gf.ROUNDS))
+            self.assertEqual(len({c["packet_hash"] for c in calls}), 1,
+                             "both rounds judge the same packet bytes")
+
+    def test_one_pass_does_not_pass_the_run(self):
+        """Stub F,P: consequence objects, alternatives passes; run FAILS."""
+        with fresh_workdir() as work, stub_env("F,P"):
+            code, _, text = run_job(work, PASS_BUILD)
+            self.assertEqual(code, 1)
+            self.assertIn("Result: FAILED", text)
+            first = self.calls(work)[:2]
+            self.assertEqual(len(first), 2)
+            self.assertEqual(first[0]["results"][gf.ROUNDS[0]]["verdict"],
+                             "fail")
+            self.assertEqual(first[1]["results"][gf.ROUNDS[1]]["verdict"],
+                             "pass")
+
+    def test_no_call_names_another_round(self):
+        """Each brief names its own round only, and records one verdict."""
+        with fresh_workdir() as work, stub_env("P,P"):
+            run_job(work, PASS_BUILD)
+            calls = self.calls(work)
+            self.assertTrue(calls)
+            for c in calls:
+                own = c["round"]
+                other = [r for r in gf.ROUNDS if r != own][0]
+                self.assertIn(f"ROUND {own}:", c["request"]["system"])
+                self.assertNotIn(f"ROUND {other}:", c["request"]["system"],
+                                 f"{own}'s reviewer was asked to run {other}")
+                self.assertEqual(set(c["results"]), {own},
+                                 "a call record carries only its own verdict")
+
+
 class TestWordMatchRevert(unittest.TestCase):
     """The card's fix-A threat: the reviewer reverts to word matching.
 
@@ -595,9 +688,8 @@ class TestMutationSentinels(unittest.TestCase):
         """Disable the rule live: the real loop must then attempt a third
         review — which test_same_round_stops_at_two (attempts == 2) fails."""
         self.assertEqual(gf.SAME_ROUND_LIMIT, 2)
-        # One stub token covers BOTH rounds per call: each failing call
-        # adds 2 to the total.
-        with fresh_workdir() as work, stub_env("F,F,F,F,F,F"):
+        # One stub token per round: F,F fails both rounds on every iteration.
+        with fresh_workdir() as work, stub_env("F,F"):
             (work / ".pipeline" / "plans").mkdir(parents=True, exist_ok=True)
             (work / ".pipeline" / "to-spec.md").write_text(
                 "# To-spec (micro)\n\nrung: probe.\n", encoding="utf-8")
@@ -629,6 +721,34 @@ class TestMutationSentinels(unittest.TestCase):
         self.assertTrue(all(v == "FAIL" for v, _ in real.values()),
                         "the vague fixture must fail under the real parser; "
                         "a never-object mutant would hide it")
+
+    def test_one_call_for_all_rounds_would_be_caught(self):
+        """Revert C1 live: collapse the review to ONE call per iteration.
+
+        The mutation keeps the real record shape, so the only thing that
+        changes is the count: one record instead of one per round.
+        test_clean_run_makes_exactly_one_call_per_round asserts 2, so the
+        revert fails the suite.
+        """
+        real = gf.do_review_run
+
+        def one_call(workdir, rounds, **kw):
+            agg = real(workdir, rounds[:1], **kw)  # the pre-C1 shape
+            agg["results"] = {r: agg["results"][rounds[0]] for r in rounds}
+            return agg
+
+        gf.do_review_run = one_call
+        try:
+            with fresh_workdir() as work, stub_env("P,P"):
+                code, _, _ = run_job(work, PASS_BUILD)
+                calls = list((work / ".pipeline" / "reviews" / "goldfish"
+                              ).glob("call-*.json"))
+        finally:
+            gf.do_review_run = real
+        self.assertEqual(code, 0)
+        self.assertEqual(len(calls), 1,
+                         "the mutant makes one call per iteration; the "
+                         "per-round test asserting 2 records would FAIL")
 
 
 class TestFixGRunnerHygiene(unittest.TestCase):
@@ -1139,6 +1259,42 @@ class TestGrillSkillContract(unittest.TestCase):
         self.assertIn("job slug", self.low)
         self.assertIn("reads only", self.low)
         self.assertIn("rounds for its own `--job`", self.low)
+
+
+class TestGoldfishDoctrineContract(unittest.TestCase):
+    """C3/C4: the overlay text must match what the runner now does.
+
+    Two prose rules carry the independence promise: a separate zero-context
+    worker (C3), and one reviewer call per round with all rounds passing on
+    their own (C4). Text is the behavior a reading agent acts on, so this
+    reads the installed overlay as text.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.text = OVERLAY.read_text(encoding="utf-8")
+        cls.low = cls.text.lower()
+
+    def test_same_session_fallback_is_gone(self):
+        self.assertNotIn("spec cold", self.low,
+                         "the same-session cold re-read is still offered")
+        self.assertNotIn("simulate it by re-reading", self.low)
+
+    def test_requires_a_separate_zero_context_worker(self):
+        self.assertIn("separate, zero-context worker", self.low)
+        self.assertIn("fresh session", self.low)
+
+    def test_one_round_per_reviewer_call(self):
+        self.assertIn("one round per reviewer call", self.low)
+        self.assertIn("every round must pass on its own", self.low)
+
+    def test_selfcheck_literals_survive(self):
+        """scripts/selfcheck.sh greps these exact strings; rewording them
+        would silence the lint without failing anything else."""
+        for literal in ("Each round note states the sources opened",
+                        "A second failure on the same round stops the",
+                        "A rung never steps down"):
+            self.assertIn(literal, self.text)
 
 
 class TestGrilledSpecSurvivesDefine(unittest.TestCase):

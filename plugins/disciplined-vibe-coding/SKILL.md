@@ -2,7 +2,7 @@
 name: disciplined-vibe-coding
 description: Run any coding task through Intake, Define, Economy gate, Plan, Teardown, Build, Verify, Commit — with Wayfinder tracking riding along. Use at the start of any build, fix, or multi-session project.
 phase: Any
-version: 0.3.3
+version: 0.3.4
 ---
 
 # Disciplined vibe-coding pipeline — end to end
@@ -28,8 +28,11 @@ Wayfinder rides along all stages (one-line status plus gate result at each stage
   working from the whole conversation.
 - **Goldfish** sees only the spec plus the sources it links to, with no
   memory of the earlier chat. That fresh-eyes read is what catches
-  unstated assumptions. Simulate it by re-reading the spec cold, or hand
-  the spec alone to a second session.
+  unstated assumptions. It must be a separate, zero-context worker: hand
+  the packet to a fresh session, or let the runner's reviewer take it.
+  Reading the spec again in this session is not the goldfish — the
+  conversation you already had is exactly the bias the round exists to
+  remove.
 - **You** resolve trade-offs and approve the spec before any code exists.
 
 Design with the elephant. Review with the goldfish. You decide.
@@ -175,8 +178,13 @@ is where a plan worth reviewing exists.
 Run the teardown with goldfish eyes: spec plus linked sources only,
 earlier conversation ignored. The reviewer opens only the spec plus
 its linked sources: no chat memory, no hallway context, no "you know
-what I meant." Each round note states the sources opened. Similar is
-not same: a look-alike precedent that answers a different question
+what I meant." Each round note states the sources opened.
+One round per reviewer call, and every round must pass on its own:
+rounds are never asked together in one completion, because that single
+reply is where one round can cover for another. A round's reviewer sees
+the packet and its own round only — no other round's verdict, no earlier
+round's concessions to build on. Similar is not same: a look-alike
+precedent that answers a different question
 does not pass. Rung-scaled:
 
 - **Micro-spec and below (two passes):** consequence pass asks what

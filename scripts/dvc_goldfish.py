@@ -6,12 +6,14 @@ Contract (Brad's stop rules):
   to-spec, the lock (or lock-pending state), the plans, and the build
   output. Fixed file set, nothing else. No teardown scratch notes, no
   elephant responses, no chat history, no memory, no RAG.
-- Goldfish reviews with ONE model call made outside any agent loop:
-  system prompt = the packet template filled with only the stage and
-  round list, user message = the packet inlined as delimited files,
-  ``tools`` empty. It cannot amend anything, cannot run anything, and
-  cannot approve: there is no approve verdict. An empty objection list
-  IS the pass. Only the absence of objection ends the loop.
+- Goldfish reviews with ONE model call per round, made outside any agent
+  loop: system prompt = the packet template filled with only the stage
+  and that one round, user message = the packet inlined as delimited
+  files, ``tools`` empty. A round's reviewer never sees another round's
+  verdict, so rounds cannot collude on a pass. It cannot amend anything,
+  cannot run anything, and cannot approve: there is no approve verdict.
+  An empty objection list IS the pass. Only the absence of objection ends
+  the loop.
 - Objections return to the elephant as new work (rework the artifact,
   never the spec); review then restarts from the top round, because
   rework can break earlier passes and no human is around to judge the
@@ -42,8 +44,11 @@ Fail closed: an oversize packet, a missing spec, a swapped packet file,
 or an unreachable provider stops the run as FAILURE (rule
 ``review-error``) -- never as a silent pass.
 
-Test stub: ``DVC_GOLDFISH_STUB`` (comma-separated F/P verdicts consumed in
-call order, one token per review call) is honored only when the run was
+Test stub: ``DVC_GOLDFISH_STUB`` (comma-separated F/P verdicts, one token
+per review round in round order; a semicolon starts the next iteration's
+script, so ``F,F;P,P`` fails both rounds once then passes both; rounds the
+script does not cover, and iterations past the last script, repeat PASS and
+the last script respectively) is honored only when the run was
 started with the explicit ``--test-mode`` CLI flag AND ``DVC_TEST_MODE=1``
 — an inherited env var alone never switches the gate off. Every stubbed
 verdict is marked STUB on screen, in goldfish.json, in the call record,
@@ -131,13 +136,22 @@ def _stub_allowed(test_mode=False) -> bool:
     return bool(test_mode) and os.environ.get(TEST_ENV) == "1"
 
 
-def _stub_tokens(test_mode=False):
-    """Verdict script for tests; None in production (stub ignored there)."""
+def _stub_tokens(test_mode=False, iteration=0):
+    """Verdict script for tests; None in production (stub ignored there).
+
+    ``F,P`` repeats on every iteration. A semicolon starts the next
+    iteration's script (``F,F;P,P`` fails once, then passes), so the loop's
+    fail-then-recover and total-cap paths are reachable; the last script
+    repeats after the script runs out.
+    """
     if not _stub_allowed(test_mode):
         return None
-    raw = os.environ.get(STUB_ENV, "")
-    tokens = [t.strip().upper() for t in raw.split(",") if t.strip()]
-    return tokens or None
+    scripts = [[t.strip().upper() for t in group.split(",") if t.strip()]
+               for group in os.environ.get(STUB_ENV, "").split(";")]
+    scripts = [s for s in scripts if s]
+    if not scripts:
+        return None
+    return scripts[min(max(iteration, 0), len(scripts) - 1)]
 
 
 def _est_tokens(data: bytes) -> int:
@@ -493,63 +507,79 @@ def parse_verdicts(text: str, rounds: list[str]) -> dict[str, tuple[str, str]]:
 
 
 def do_review_run(workdir, rounds: list[str],
-                   define_spec: bytes | None = None,
-                   test_mode: bool = False) -> dict:
-    """One packet + one model call covering all rounds. Returns the recorded
-    call (verdicts, packet path, envelope, raw response)."""
+                  define_spec: bytes | None = None,
+                  test_mode: bool = False, iteration: int = 0) -> dict:
+    """One packet, one model call PER ROUND. Returns the iteration's merged
+    verdicts, the recorded calls, and the loose envelope facts.
+
+    Each brief asks for exactly one round, so no reviewer ever sees another
+    round's verdict: rounds cannot collude on a pass.
+
+    iteration selects the stub's per-iteration script; it never reaches the
+    provider (a real call is identical on every iteration).
+    """
     workdir = Path(workdir)
     cfg = _config()
     pkt = do_packet(workdir, define_spec)
     packet_dir = Path(pkt["dir"])
     manifest = json.loads((packet_dir / "manifest.json").read_text(
         encoding="utf-8"))
-    brief = build_brief(rounds)
-    brief_hash = _sha(brief.encode())
-    stub = None
-    tokens = _stub_tokens(test_mode)
-    if tokens is not None:
-        tok = tokens.pop(0) if tokens else "P"
-        text = _stub_response(rounds, "pass" if tok.startswith("P") else "fail")
-        rid = ""
-        tin = _est_tokens(brief.encode())
-        tout = _est_tokens(text.encode())
-        stub = tok
-    else:
-        user_msg = _inline_packet(packet_dir, manifest)
-        text, rid_base, tin, tout = _provider_call(
-            cfg, cfg["model"], brief, user_msg)
-        rid = rid_base
-    request_hash = _request_hash(cfg["model"], brief, packet_dir, manifest)
-    try:
-        verdicts = parse_verdicts(text, rounds)
-    except DvcReviewError as exc:
-        verdicts = {r: ("FAIL", str(exc)) for r in rounds}
-    try:
-        seq = max([int(p.stem.split("-")[-1])
-                   for p in (workdir / REVIEWS_REL).glob("call-*.json")]
-                  + [0]) + 1
-    except ValueError:
-        seq = 1
-    if stub is not None:
-        rid = f"stub-{seq:04d}"
-    rec = {"format": FORMAT_CALL, "rounds": list(rounds),
-           "packet_hash": pkt["packet_hash"], "packet_dir": pkt["dir"],
-           "brief_hash": brief_hash, "request_hash": request_hash,
-           "request": _request_envelope(cfg["model"], brief, manifest),
-           "response": text, "model": cfg["model"],
-           "provider_request_id": rid or f"stub-{seq:04d}",
-           "tokens_in": tin, "tokens_out": tout,
-           "stub": stub is not None,
-           "results": {r: {"verdict": v.lower(), "note": n}
-                       for r, (v, n) in verdicts.items()},
-           "created_at": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
-    if not rec["provider_request_id"]:
-        rec["provider_request_id"] = f"stub-{seq:04d}"
-    base = workdir / REVIEWS_REL
-    base.mkdir(parents=True, exist_ok=True)
-    (base / f"call-{seq:04d}.json").write_text(
-        json.dumps(rec, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    return rec
+    tokens = _stub_tokens(test_mode, iteration)
+    calls = []
+    results = {}
+    for i, rnd in enumerate(rounds):
+        brief = build_brief([rnd])
+        brief_hash = _sha(brief.encode())
+        stub = None
+        if tokens is not None:
+            tok = tokens[i] if i < len(tokens) else "P"
+            text = _stub_response([rnd], "pass" if tok.startswith("P")
+                                  else "fail")
+            rid = ""
+            tin = _est_tokens(brief.encode())
+            tout = _est_tokens(text.encode())
+            stub = tok
+        else:
+            user_msg = _inline_packet(packet_dir, manifest)
+            try:
+                text, rid, tin, tout = _provider_call(
+                    cfg, cfg["model"], brief, user_msg)
+            except DvcReviewError as exc:
+                raise DvcReviewError(f"round '{rnd}': {exc}") from exc
+        request_hash = _request_hash(cfg["model"], brief, packet_dir, manifest)
+        try:
+            verdicts = parse_verdicts(text, [rnd])
+        except DvcReviewError as exc:
+            verdicts = {rnd: ("FAIL", str(exc))}
+        try:
+            seq = max([int(p.stem.split("-")[-1])
+                       for p in (workdir / REVIEWS_REL).glob("call-*.json")]
+                      + [0]) + 1
+        except ValueError:
+            seq = 1
+        if stub is not None:
+            rid = f"stub-{seq:04d}"
+        rec = {"format": FORMAT_CALL, "round": rnd, "rounds": [rnd],
+               "packet_hash": pkt["packet_hash"], "packet_dir": pkt["dir"],
+               "brief_hash": brief_hash, "request_hash": request_hash,
+               "request": _request_envelope(cfg["model"], brief, manifest),
+               "response": text, "model": cfg["model"],
+               "provider_request_id": rid or f"stub-{seq:04d}",
+               "tokens_in": tin, "tokens_out": tout,
+               "stub": stub is not None,
+               "results": {r: {"verdict": v.lower(), "note": n}
+                           for r, (v, n) in verdicts.items()},
+               "created_at": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
+        base = workdir / REVIEWS_REL
+        base.mkdir(parents=True, exist_ok=True)
+        (base / f"call-{seq:04d}.json").write_text(
+            json.dumps(rec, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        calls.append(rec)
+        results.update(rec["results"])
+    return {"format": FORMAT_CALL, "rounds": list(rounds),
+            "packet_hash": pkt["packet_hash"], "packet_dir": pkt["dir"],
+            "results": results, "calls": calls,
+            "stub": any(c["stub"] for c in calls)}
 
 
 # ---------- loop + state (stop rules unchanged) ----------
@@ -622,7 +652,8 @@ def run_loop(workdir, elephant_respond, run_id, define_spec=None,
     """Run rounds until no objection (PASS) or a stop rule fires (FAIL).
 
     Each iteration assembles a fresh packet from the workdir and makes one
-    model call covering every round. ``elephant_respond``(round,
+    model call per round, so rounds never see each other's verdicts.
+    ``elephant_respond``(round,
     objections) reworks the artifact on disk (never the spec) and returns
     a response text. Returns the state dict (outcome.result is PASS/FAIL).
     define_spec (bytes) freezes the spec entry at the Define version —
@@ -634,11 +665,12 @@ def run_loop(workdir, elephant_respond, run_id, define_spec=None,
     workdir = Path(workdir)
     state = new_state(run_id)
     seq = 0
+    iteration = 0
     while True:
         try:
             call = do_review_run(workdir, list(ROUNDS),
                                  define_spec=define_spec,
-                                 test_mode=test_mode)
+                                 test_mode=test_mode, iteration=iteration)
         except DvcReviewError as exc:
             seq += 1
             rnd = ROUNDS[0]
@@ -662,6 +694,7 @@ def run_loop(workdir, elephant_respond, run_id, define_spec=None,
             print(format_failure(state, f"review error: {exc}", rnd),
                   flush=True)
             return state
+        iteration += 1
         spec_sha = _spec_sha(workdir)
         if call.get("stub"):
             state["stub"] = True

@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.3.4 - 2026-11-19
+
+The reviewer is independent per round. It used to ask every teardown round in
+one model call, so a single completion carried all the verdicts — one round
+could pass because the reply was already in the pass column. Each round now
+gets its own zero-context call, and every round must pass on its own. Covered
+by `tests/dvc_behavioural.py` (96/96); `scripts/selfcheck.sh` passes 56/56 but
+is lint only and proves nothing on its own.
+
+- Fixed: goldfish independence. `do_review_run` builds one brief per round,
+  calls the provider once per round, and writes one call record per round
+  (a `round` field and a one-entry `rounds` list; every round of an iteration
+  shares one `packet_hash`). A round's system prompt names that round only, so
+  no reviewer is ever asked to run a peer's round. The stub now takes one
+  token per round, in round order, so a script like `F,P` means consequence
+  fails and alternatives passes (a semicolon starts the next iteration's
+  script: `F,F;P,P` fails once, then passes).
+- Fixed: the same-session fallback is gone. Goldfish must be a separate,
+  zero-context worker; reading the spec again in the same session is stated as
+  what it is — the bias the round exists to remove. A prose-contract test holds
+  the overlay to both rules.
+- Changed: the overlay's Teardown section and `READERS.md` state one reviewer
+  call per round, all-must-pass, and that rounds never see each other's
+  verdicts.
+- Unchanged: two rounds at micro-spec (`ROUNDS`), the stop rules, the packet
+  and its hash lock, and gate G4. Five rounds stay doctrine for full-spec and
+  above; the runner still stops above micro-spec. False-failure handling is
+  unchanged: a provider or parse failure still fails closed.
+
 ## 0.3.3 - 2026-11-11
 
 The gates now tell the truth about what they prove, and every request gets a
