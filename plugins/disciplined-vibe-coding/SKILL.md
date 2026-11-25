@@ -203,7 +203,7 @@ code — no code exists yet — when a round fails, then re-run only the
 failed round (max one re-run per round at micro-spec; full-spec may re-run
 the full five once). A second failure on the same round stops the
 pipeline: no third attempt without a user direction change. Report
-tried / learned / unexplained / options and wait for his call (same
+tried / learned / unexplained / options and wait for the user's call (same
 stop shape as `debug`). Wayfinder records pass/fail plus the one-line reason
 that fired the gate.
 

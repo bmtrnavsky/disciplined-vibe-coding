@@ -32,7 +32,7 @@ by watching it applied the same way each time. Full pipeline with stages
 and artifacts: `plugins/disciplined-vibe-coding/SKILL.md`. Using another
 agent? See `READERS.md`.
 
-What the loop refuses is covered by `tests/dvc_behavioural.py` (26/26
+What the loop refuses is covered by `tests/dvc_behavioural.py` (97/97
 green; run it with `python tests/dvc_behavioural.py`): no building before
 done is written down, no shipping past a failed check, no claiming success
 because a command did not error, no committing secrets, no rounding a
@@ -48,79 +48,47 @@ called finished.
 
 ## How to use it
 
-**Install (Hermes):** copy `SOUL.md` into your profile's `SOUL.md`,
-`skills/` into your profile's skills directory, fill in `USER.md.template`
-and save it as `USER.md`. Then load this repo as a Hermes plugin — that
-gives the loop its driver (`plugins/disciplined-vibe-coding/SKILL.md`).
-Using another agent? `SOUL.md` becomes your system prompt and the
-`SKILL.md` files load wherever your tool loads skills from; see
-`READERS.md`.
+**Install:** your helper sets it up in your profile — the personality, the
+skill library, and a short note about you and what you're building. You
+don't install anything yourself and you never have to edit a settings file.
 
-**First run:** the runner executes Define through Verify with no human in
-the loop:
+**First run:** tell it what you want built, in your own words. "Add a
+contact form to my site." "Make the invoice totals round correctly." It
+asks what "done" means, writes that down, and shows you the answer before
+it starts building. If your description is thin, it asks questions instead
+of guessing.
 
-```bash
-python scripts/dvc_run.py --job "add a contact form" --workdir ./myjob --build "pytest -q"
-```
+**What to expect:** each step announces itself and says what it is doing
+and why. When something cannot be proven, it stops and tells you rather
+than carrying on quietly. At the end you get a short report: what changed,
+what was checked, and what is still open.
 
-**What good output looks like:** each stage prints a verdict line, and the
-run ends with a report path:
+**Day to day:** small jobs take one pass. Bigger projects break into
+milestones, each with its own pass, so you always know where you are. You
+can stop at any moment and ask "where are we?" and get a straight answer.
 
-```
-[Define]
-locked .pipeline/to-spec.md sha256:6650bfed936e
-GATE PASS: G1 define/spec-locked — spec present and lock recorded.
-GATE PASS: G2 economy/rung-declared — rung sentence declared in to-spec.
-[Plan]
-plan: .pipeline/plans/01-demo-job.md
-GATE PASS: G3 plan/shaped — 01-demo-job.md: 4 non-empty lines.
-...
-report: myjob/.pipeline/run-report.md
-```
-
-A run that cannot prove its step stops and says so instead of continuing.
-Give no `--build` command and it stops before review with `NOT BUILT`
-rather than inventing a result (proven by
-`test_no_build_reports_not_built` in the same suite).
+**Using a different assistant?** The same pack works with any assistant that
+can load written instructions. The setup note in this repo covers the one
+thing that changes.
 
 Sibling project:
 [spec-driven-data-analysis](https://github.com/bmtrnavsky/spec-driven-data-analysis)
 applies the same discipline to data work — lock the spec before touching
 the data, verify every run.
 
-## Layout
+## What it won't do
 
-    SOUL.md              the persona — how it talks, what it never compromises on
-    USER.md.template      fill in your own background, environment, and preferences
-    UPDATE.md             update contract: shipped paths read-only to you, user edits in user/
-    scripts/update.sh     updater for manual checkouts only (catalog installs: `hermes plugins update disciplined-vibe-coding`)
-    user/                 your overlay — customizations live here, never touched by updates
-    scripts/dvc_run.py    the runner: Define → Verify with no human in the loop
-    scripts/selfcheck.sh  lint-only string checks (proves nothing alone)
-    tests/dvc_behavioural.py  behavioural tests: runs the real runner,
-                              asserts on real output (`python tests/dvc_behavioural.py`)
-    HOOKS.md              optional shell hook for research-freshness nudges
-    hooks/                the one hook this pack ships
-    skills/               the ten skills that make up the loop
-    plugins/disciplined-vibe-coding/
-                          v0.2.0 pipeline overlay (stages, gates, rung rules),
-                          economy ladder, to-spec/plan/wayfinder templates,
-                          changelog
-    READERS.md            use this pack from any agent with a skill loader
-                          (or none — paste-per-stage fallback included)
-    ATTRIBUTIONS.md        what this pack draws from, and where
-    SOURCE-LICENSES.md    full license text and copyright lines for every source
-    CATALOG.md            draft entry for the Hermes plugin catalog
-
-Engineers: gates, red-team history, and accepted risks live in
-[docs/HARDENING.md](docs/HARDENING.md).
+It won't call something finished just because nothing crashed. It won't
+skip the planning step on work that matters. It won't touch live money or
+public-facing systems without a rollback plan and a second pair of eyes.
+On small, low-risk jobs it stays light; the heavier checks appear when the
+stakes do.
 
 ## License
 
-MIT for everything original to this pack (`SOUL.md`, `USER.md.template`,
-`HOOKS.md`, this README). The ten skills derive from several MIT-licensed
-sources, and the pipeline's elephant/goldfish framing is adapted from
-Google's Elephant-Goldfish Model (Apache-2.0). See `ATTRIBUTIONS.md` for
-lineage and `SOURCE-LICENSES.md` for the full license text and copyright
-line of every upstream project. Those notices travel with this pack per
-their license terms; keep them if you fork or redistribute.
+MIT for everything original to this pack. The thirteen skills draw on
+several MIT-licensed sources, and the elephant/goldfish framing is adapted
+from Google's Elephant-Goldfish Model (Apache-2.0). See `ATTRIBUTIONS.md`
+for lineage and `SOURCE-LICENSES.md` for the full license text and
+copyright line of every upstream project. Those notices travel with this
+pack per their license terms; keep them if you fork or redistribute.
