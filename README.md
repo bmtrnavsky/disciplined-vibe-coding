@@ -10,8 +10,8 @@
 
 Disciplined Vibe Coding is a skill pack and persona for a coding agent
 (built for Hermes; portable to any agent that supports skill files). It is
-for someone who wants to build real software — small fixes through
-multi-week projects — without being a software engineer. It supplies the
+for someone who wants to build real software, from small fixes through
+multi-week projects, without being a software engineer. It supplies the
 discipline a senior lead would insist on: say what done looks like before
 building, test before shipping, verify before claiming finished. You lean
 on the loop instead of having to already know it.
@@ -62,22 +62,22 @@ as it goes, use this.
 
 ## Install
 
-Two ways in. Both are plain files — nothing to compile.
+Two ways in. Both are plain files; nothing to compile.
 
-**Path A — Ask your agent.** Paste this sentence into your coding assistant:
+**Path A: Ask your agent.** Paste this sentence into your coding assistant:
 
 > Install the disciplined-vibe-coding plugin from https://github.com/bmtrnavsky/disciplined-vibe-coding.
 
-**Path B — Self install.**
+**Path B: Self install.**
 
 1. Get the files: `git clone https://github.com/bmtrnavsky/disciplined-vibe-coding`, or download the ZIP from the same page and unzip it.
 2. Copy the persona (`SOUL.md`) and the skills folder into your assistant, using its own instructions for where written guidance lives.
 3. Open `USER.md.template`, fill in the bracketed lines about you and what you're building, and save it where your assistant reads it.
-4. Per-assistant details — exactly which folders to copy, and what changes when your assistant has no skill loader — are in `READERS.md`.
+4. Per-assistant details (exactly which folders to copy, and what changes when your assistant has no skill loader) are in `READERS.md`.
 
 ## How to use it
 
-**Install:** your helper sets it up in your profile — the personality, the
+**Install:** your helper sets it up in your profile: the personality, the
 skill library, and a short note about you and what you're building. You
 don't install anything yourself and you never have to edit a settings file.
 
@@ -102,7 +102,7 @@ thing that changes.
 
 Sibling project:
 [spec-driven-data-analysis](https://github.com/bmtrnavsky/spec-driven-data-analysis)
-applies the same discipline to data work — lock the spec before touching
+applies the same discipline to data work: lock the spec before touching
 the data, verify every run.
 
 ## What it won't do
