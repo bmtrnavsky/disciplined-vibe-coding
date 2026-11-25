@@ -54,11 +54,11 @@ the stakes rise. Every step is explained in plain words while it happens, so
 someone who does not write code learns the shape of good practice instead of
 just following orders. Strict checklists are written for engineers: they run the
 full ritual on every task however small, with no exceptions, and assume you
-already know why each step exists. Superpowers is that kind of strict
-checklist, and its discipline is real — this pack borrows from it. The
-difference is fit: if you want identical rigor at every size and you already
-speak the language, a fixed checklist suits you; if you want the rigor to grow
-with the risk and to teach as it goes, use this.
+already know why each step exists. That discipline is real, and this pack
+borrows from it (see ATTRIBUTIONS.md). The difference is fit: if you want
+identical rigor at every size and you already speak the language, a fixed
+checklist suits you; if you want the rigor to grow with the risk and to teach
+as it goes, use this.
 
 ## Install
 
