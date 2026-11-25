@@ -10,6 +10,7 @@ phase: Plan
 A plan is atomic tasks scoped to ONE milestone.
 
 ## Steps (in order)
+0. **Isolation check (full-spec and above; one-liner and micro-spec work in place).** Already in an isolated workspace? Run `git rev-parse --path-format=absolute --git-dir --git-common-dir` (git 2.31 or newer). If the two paths differ, you are isolated, proceed. If the command errors (git older than 2.31), treat it as not isolated and ask. If not isolated, ask the user once: isolated worktree or work in place; carry the answer into the decision log when the plan file is written in step 1. Headless runs do not ask: work in place, and log that. If isolated is chosen, the orchestrator creates the worktree before the step-1 plan file is written, then copies `.pipeline/` into it, since `.pipeline/` is gitignored and a fresh worktree will not have it.
 1. **Scope.** `.pipeline/plans/NN-<milestone>.md` per milestone. One-liner rung: no plan file — the chat line carries it. Micro-spec: 3 bullets. Full-spec and above: full format below.
 2. **Decompose** into 2–5 minute tasks: path, content, expected output, pass/fail check observable without source.
 3. **Budget line for long tasks.** Anything >2 minutes of wall time (training runs, big migrations, bulk embedding) gets an explicit line: expected duration, expected cost if paid compute, and completion signal (file written, metric logged). Never let a multi-hour run start without one.

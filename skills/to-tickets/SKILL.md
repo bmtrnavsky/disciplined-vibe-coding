@@ -251,7 +251,7 @@ makes rollback a revert and makes cross-session resume a named thing.
 - Never puts ticket FILES in `.pipeline/plans/` — a stray file there can satisfy
   the plan-shape check. Ticket groups live inside the plan file, never as a new
   file in that directory.
-- Never invents scope the plan does not contain. Discoveries go back to the plan.
+- Never invents scope the plan does not contain. Structural discoveries go back to the plan.
 
 ## Done when
 

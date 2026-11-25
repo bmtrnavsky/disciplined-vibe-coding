@@ -15,14 +15,14 @@ Understanding precedes solutions. Approach forks get aired here, once.
 3. Per fork: 2–3 approaches — what it is, main cost, main benefit, when it wins.
 4. **Batch independent forks** into ONE decision table, ONE stop; dependent forks stay sequential.
 5. **Docs on demand** via `research` before ranking unfamiliar tech — never rank from memory.
-6. Recommendation + why per fork; his preference where it matters.
+6. Recommendation + why per fork; the user's preference where it matters.
 
 ## Done when
-- Every fork has one chosen answer (his or stated-reason yours).
+- Every fork has one chosen answer (the user's or stated-reason yours).
 - Closing plain paragraph "what we'll build and how" delivered.
 
 ## Cognitive traps
-- "One question per turn is polite" — batched stops respect his time.
+- "One question per turn is polite" — batched stops respect the user's time.
 - "Memory is API knowledge" — step 5 exists for that.
 
 ## Guardrails

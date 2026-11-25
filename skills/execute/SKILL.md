@@ -28,19 +28,20 @@ store it. For published cards the board's `parents=` is the same frontier, and
 Kanban enforces that half; inside a run these lines are the only frontier there
 is, so read them instead of guessing independence from prose.
 
-5. **Checkpoint report** plainly: built/where/what passed/what owes. Offer continue/adjust/stop. Wait on structural.
-6. **Long-running tasks** (training, bulk jobs): start them, report the job id/log path, and DON'T block the checkpoint loop — queue completion review as a task with its metric band from the budget line.
-7. **Session close:** status footer update + commit + one-sentence stopping point.
-8. **Diff-size flag** at ~2x estimate: stop; report growth.
+5. **Ruling ledger, not stalls.** Ambiguity and local defects inside the approved scope: the orchestrator decides them; workers report the ambiguity in their diff and never rule. Log each behavior-changing ruling as `Ruling: <what decided> / <why> / <cost if wrong>` in the checkpoint report and in the checkpoint commit message; omit the line when there are none. Deviating from the plan without a logged ruling is a decision made in secret. Anything changing scope, acceptance criteria, or interfaces is structural: it goes back to the plan and waits. Beyond the structural, gate (step 1), and diff-size (step 9) stops, stop only for: irreversible or destructive op, security-sensitive action, side effect outside this work (branch merge, push to shared branch, publish), or a plan so broken every path is a guess.
+6. **Checkpoint report** plainly: built/where/what passed/rulings/what owes. Offer continue/adjust/stop. Wait on structural.
+7. **Long-running tasks** (training, bulk jobs): start them, report the job id/log path, and DON'T block the checkpoint loop — queue completion review as a task with its metric band from the budget line.
+8. **Session close:** status footer update + commit + one-sentence stopping point.
+9. **Diff-size flag** at ~2x estimate: stop; report growth.
 
 ## Cognitive traps
 - "Workers can run their own git" — one hand writes the books.
 - "Launch-and-pray is parallelism" — long jobs are launched with completion reviews queued.
-- "Checkpoints slow him down" — checkpoints are his control.
+- "Checkpoints slow things down" — checkpoints are the user's control.
 
 ## Guardrails
 - Workers never hold approval power.
-- No code outside the approved plan; discoveries go back to the plan.
+- No code outside the approved plan; structural discoveries go back to the plan.
 
 ## Rung scaling (economy ladder)
 

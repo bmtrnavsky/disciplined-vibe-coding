@@ -10,12 +10,12 @@ phase: Build
 Never patch a symptom you haven't explained.
 
 ## Steps (in order)
-1. **Reproduce** if you can; else observation mode (his symptoms, exact errors, timing). No blind coding.
+1. **Reproduce** if you can; else observation mode (the user's symptoms, exact errors, timing). No blind coding.
 2. **Docs ALWAYS** via `research` docs step; vendor changelogs count as docs for post-update breakage. Log it.
 3. **Ranked falsifiable theories**, each one-step checkable.
 4. **Isolate cause.** "Fix worked" without "cause is X" is not done.
 5. **Fix + guard** where guardable; unguardable stacks get honest declaration + recorded manual check.
-6. **Two-failure stop:** tried / learned / unexplained / options. His call.
+6. **Two-failure stop:** tried / learned / unexplained / options. The user's call.
 
 ## Cognitive traps
 - "I know this stack" — confident wrong fixes are born there. Docs.
