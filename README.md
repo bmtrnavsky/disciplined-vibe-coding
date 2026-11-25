@@ -46,6 +46,35 @@ anything public-facing). The tier changes what gets asked, what gets a
 rollback plan, and whether a stronger model reviews the work before it's
 called finished.
 
+## Why this instead of a strict checklist
+
+This pack sizes the ceremony to the job: a small, low-risk fix gets one short
+pass, and the heavier reviews, rollback plans, and second looks appear only as
+the stakes rise. Every step is explained in plain words while it happens, so
+someone who does not write code learns the shape of good practice instead of
+just following orders. Strict checklists are written for engineers: they run the
+full ritual on every task however small, with no exceptions, and assume you
+already know why each step exists. Superpowers is that kind of strict
+checklist, and its discipline is real — this pack borrows from it. The
+difference is fit: if you want identical rigor at every size and you already
+speak the language, a fixed checklist suits you; if you want the rigor to grow
+with the risk and to teach as it goes, use this.
+
+## Install
+
+Two ways in. Both are plain files — nothing to compile.
+
+**Path A — Ask your agent.** Paste this sentence into your coding assistant:
+
+> Install the disciplined-vibe-coding plugin from https://github.com/bmtrnavsky/disciplined-vibe-coding.
+
+**Path B — Self install.**
+
+1. Get the files: `git clone https://github.com/bmtrnavsky/disciplined-vibe-coding`, or download the ZIP from the same page and unzip it.
+2. Copy the persona (`SOUL.md`) and the skills folder into your assistant, using its own instructions for where written guidance lives.
+3. Open `USER.md.template`, fill in the bracketed lines about you and what you're building, and save it where your assistant reads it.
+4. Per-assistant details — exactly which folders to copy, and what changes when your assistant has no skill loader — are in `READERS.md`.
+
 ## How to use it
 
 **Install:** your helper sets it up in your profile — the personality, the
